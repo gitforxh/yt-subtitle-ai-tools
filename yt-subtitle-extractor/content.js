@@ -577,12 +577,14 @@
     const explainCache = new Map();
     let explainPausedVideo = null;
     let explainWasPlayingBeforeOpen = false;
+    let activeAIRequestId = '';
+    let activeAIRequestInFlight = false;
 
-    async function fetchAIWordByWordExplanation(text) {
+    async function fetchAIWordByWordExplanation(text, requestId) {
         const cacheKey = `ai:${text.trim()}`;
         if (explainCache.has(cacheKey)) return explainCache.get(cacheKey);
 
-        const res = await chrome.runtime.sendMessage({ type: 'ai:explain', text });
+        const res = await chrome.runtime.sendMessage({ type: 'ai:explain', text, requestId });
         if (!res?.ok) {
             throw new Error(res?.error || 'AI explanation failed. Please check helper settings.');
         }
@@ -679,6 +681,12 @@
     }
 
     function closeExplainDialog() {
+        if (activeAIRequestInFlight && activeAIRequestId) {
+            chrome.runtime.sendMessage({ type: 'ai:cancel', requestId: activeAIRequestId }).catch?.(() => {});
+        }
+        activeAIRequestInFlight = false;
+        activeAIRequestId = '';
+
         if (explainDialog) explainDialog.style.display = 'none';
         try {
             const sel = window.getSelection?.();
@@ -794,15 +802,33 @@
                 aiBtn.disabled = true;
                 aiStatus.textContent = 'Thinking...';
                 list.innerHTML = '';
+
+                const rid = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                activeAIRequestId = rid;
+                activeAIRequestInFlight = true;
+
                 try {
-                    const items = await fetchAIWordByWordExplanation(text);
+                    const items = await fetchAIWordByWordExplanation(text, rid);
+                    if (!activeAIRequestInFlight || activeAIRequestId !== rid || !explainDialog || explainDialog.style.display === 'none') {
+                        return;
+                    }
                     list.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">AI</div>${renderExplainItems(items)}`;
                     aiStatus.textContent = '';
                     positionExplainDialogNearSelection(dialog, selection, anchorEl);
                 } catch (err) {
-                    list.innerHTML = `AI error: ${(err?.message || 'Failed').replace(/</g, '&lt;')}`;
+                    if (!activeAIRequestInFlight || activeAIRequestId !== rid || !explainDialog || explainDialog.style.display === 'none') {
+                        return;
+                    }
+                    const msg = (err?.message || 'Failed').replace(/</g, '&lt;');
+                    if (!/abort/i.test(msg)) {
+                        list.innerHTML = `AI error: ${msg}`;
+                    }
                     aiStatus.textContent = '';
                 } finally {
+                    if (activeAIRequestId === rid) {
+                        activeAIRequestInFlight = false;
+                        activeAIRequestId = '';
+                    }
                     aiBtn.disabled = false;
                 }
             };

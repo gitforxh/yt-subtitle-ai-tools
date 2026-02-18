@@ -11,26 +11,62 @@ async function getBridgeConfig() {
   return data.bridgeConfig || null;
 }
 
-async function callExplain(text) {
+const inflightExplainRequests = new Map();
+
+async function callExplain(text, requestId) {
   const cfg = await getBridgeConfig();
   const helperUrl = (cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
   const sessionKey = cfg?.sessionKey || 'ext-transcript';
   const userLanguage = (cfg?.userLanguage || 'en').trim();
 
-  const res = await fetch(`${helperUrl}/explain`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionKey, userLanguage })
-  });
+  const rid = String(requestId || `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const controller = new AbortController();
+  inflightExplainRequests.set(rid, { controller, helperUrl });
 
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Helper failed: ${res.status} ${txt.slice(0, 200)}`);
+  try {
+    const res = await fetch(`${helperUrl}/explain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, sessionKey, userLanguage, requestId: rid }),
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Helper failed: ${res.status} ${txt.slice(0, 200)}`);
+    }
+
+    const data = await res.json();
+    if (!data?.ok) throw new Error(data?.error || 'Helper error');
+    return Array.isArray(data.items) ? data.items : [];
+  } finally {
+    inflightExplainRequests.delete(rid);
+  }
+}
+
+async function cancelExplain(requestId) {
+  const rid = String(requestId || '').trim();
+  if (!rid) return { ok: true };
+
+  const current = inflightExplainRequests.get(rid);
+  if (current?.controller) {
+    try { current.controller.abort(); } catch (_) {}
   }
 
-  const data = await res.json();
-  if (!data?.ok) throw new Error(data?.error || 'Helper error');
-  return Array.isArray(data.items) ? data.items : [];
+  const cfg = await getBridgeConfig();
+  const helperUrl = (current?.helperUrl || cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
+  try {
+    await fetch(`${helperUrl}/abort`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: rid })
+    });
+  } catch (_) {
+    // best effort
+  }
+
+  inflightExplainRequests.delete(rid);
+  return { ok: true };
 }
 
 async function testBridge(config) {
@@ -104,8 +140,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg?.type === 'ai:explain') {
-        const items = await callExplain(msg.text || '');
+        const items = await callExplain(msg.text || '', msg.requestId || '');
         sendResponse({ ok: true, items });
+        return;
+      }
+      if (msg?.type === 'ai:cancel') {
+        await cancelExplain(msg.requestId || '');
+        sendResponse({ ok: true });
         return;
       }
       sendResponse({ ok: false, error: 'Unknown message type' });

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,50 @@ type OpenClawMessage struct {
 
 type OpenClawHistoryResp struct {
 	Messages []OpenClawMessage `json:"messages"`
+}
+
+type inflightRequest struct {
+	cancel     context.CancelFunc
+	sessionKey string
+}
+
+type requestTracker struct {
+	mu sync.Mutex
+	m  map[string]inflightRequest
+}
+
+func (t *requestTracker) set(id string, r inflightRequest) {
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.m == nil {
+		t.m = map[string]inflightRequest{}
+	}
+	t.m[id] = r
+}
+
+func (t *requestTracker) take(id string) (inflightRequest, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.m == nil {
+		return inflightRequest{}, false
+	}
+	r, ok := t.m[id]
+	if ok {
+		delete(t.m, id)
+	}
+	return r, ok
+}
+
+func (t *requestTracker) del(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.m == nil {
+		return
+	}
+	delete(t.m, id)
 }
 
 func getenv(k, d string) string {
@@ -115,8 +160,10 @@ func textFromMessage(m OpenClawMessage) string {
 	}
 }
 
-func explainViaOpenClaw(openclawBin, selectedText, sessionKey, userLanguage string) ([]any, error) {
-	requestID := fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
+func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionKey, userLanguage, requestID string) ([]any, error) {
+	if strings.TrimSpace(requestID) == "" {
+		requestID = fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
+	}
 	lang := strings.TrimSpace(userLanguage)
 	if lang == "" {
 		lang = "en"
@@ -126,9 +173,6 @@ func explainViaOpenClaw(openclawBin, selectedText, sessionKey, userLanguage stri
 		lang,
 		selectedText,
 	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
-	defer cancel()
 
 	var sendResp map[string]any
 	err := runOpenClaw(ctx, openclawBin, "chat.send", map[string]any{
@@ -181,7 +225,12 @@ func explainViaOpenClaw(openclawBin, selectedText, sessionKey, userLanguage stri
 							"word":         pattern,
 							"reading":      "grammar",
 							"partOfSpeech": "pattern",
-							"meaning":      strings.TrimSpace(explanation + func() string { if strings.TrimSpace(example)!="" { return " Example: " + example }; return "" }()),
+							"meaning": strings.TrimSpace(explanation + func() string {
+								if strings.TrimSpace(example) != "" {
+									return " Example: " + example
+								}
+								return ""
+							}()),
 						})
 					}
 				}
@@ -205,8 +254,20 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func abortOpenClawSession(openclawBin, sessionKey string) {
+	sessionKey = strings.TrimSpace(sessionKey)
+	if sessionKey == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out map[string]any
+	_ = runOpenClaw(ctx, openclawBin, "chat.abort", map[string]any{"sessionKey": sessionKey}, &out)
+}
+
 func main() {
 	cfg := loadConfig()
+	tracker := &requestTracker{m: map[string]inflightRequest{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +281,38 @@ func main() {
 	mux.HandleFunc("/oauth/start", func(w http.ResponseWriter, r *http.Request) {
 		cors(w)
 		writeJSON(w, 200, map[string]any{"ok": true, "mode": "openclaw-bridge", "message": "OAuth disabled in bridge mode"})
+	})
+	mux.HandleFunc("/abort", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			cors(w)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			cors(w)
+			writeJSON(w, 405, map[string]any{"ok": false, "error": "method not allowed"})
+			return
+		}
+		cors(w)
+		body, _ := io.ReadAll(r.Body)
+		var in struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil {
+			writeJSON(w, 400, map[string]any{"ok": false, "error": "invalid json"})
+			return
+		}
+		rid := strings.TrimSpace(in.RequestID)
+		if rid == "" {
+			writeJSON(w, 400, map[string]any{"ok": false, "error": "missing requestId"})
+			return
+		}
+		req, ok := tracker.take(rid)
+		if ok {
+			req.cancel()
+			go abortOpenClawSession(cfg.OpenClawBin, req.sessionKey)
+		}
+		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 	mux.HandleFunc("/explain", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
@@ -238,6 +331,7 @@ func main() {
 			Text         string `json:"text"`
 			SessionKey   string `json:"sessionKey"`
 			UserLanguage string `json:"userLanguage"`
+			RequestID    string `json:"requestId"`
 		}
 		if err := json.Unmarshal(body, &in); err != nil {
 			writeJSON(w, 400, map[string]any{"ok": false, "error": "invalid json"})
@@ -254,12 +348,28 @@ func main() {
 		}
 		// No context mode: use an ephemeral session key per request for faster responses.
 		ephemeralSessionKey := fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano())
-		items, err := explainViaOpenClaw(cfg.OpenClawBin, in.Text, ephemeralSessionKey, in.UserLanguage)
+		requestID := strings.TrimSpace(in.RequestID)
+		if requestID == "" {
+			requestID = fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
+		tracker.set(requestID, inflightRequest{cancel: cancel, sessionKey: ephemeralSessionKey})
+		defer func() {
+			tracker.del(requestID)
+			cancel()
+		}()
+
+		items, err := explainViaOpenClaw(ctx, cfg.OpenClawBin, in.Text, ephemeralSessionKey, in.UserLanguage, requestID)
 		if err != nil {
+			if ctx.Err() == context.Canceled {
+				writeJSON(w, 499, map[string]any{"ok": false, "error": "request canceled"})
+				return
+			}
 			writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true, "items": items})
+		writeJSON(w, 200, map[string]any{"ok": true, "items": items, "requestId": requestID})
 	})
 
 	addr := "127.0.0.1:" + cfg.Port
