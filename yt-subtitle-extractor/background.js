@@ -96,12 +96,12 @@ function tokenizeQuery(text) {
     seen.add(key);
     deduped.push(p);
   }
-  return deduped.slice(0, 5);
+  return deduped;
 }
 
 const dictTokenCache = new Map();
 const DICT_CACHE_TTL_MS = 10 * 60 * 1000;
-const MAX_CONCURRENT_LOOKUPS = 2;
+const MAX_CONCURRENT_LOOKUPS = 4;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
