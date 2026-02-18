@@ -771,10 +771,8 @@
                 margin-right:4px;
                 cursor:pointer;
                 font-weight:${active ? '700' : '500'};
-                max-width:140px;
                 white-space:nowrap;
-                overflow:hidden;
-                text-overflow:ellipsis;
+                overflow:visible;
             ">${token}</button>`;
         }).join('');
 
@@ -791,6 +789,20 @@
                 <div>${tabPanels}</div>
             </div>
         `;
+    }
+
+    function adjustExplainDialogWidthForTabs(root) {
+        if (!explainDialog || !root) return;
+        const wrap = root.querySelector('[data-dict-tabs-wrap]');
+        if (!wrap) return;
+        const tabs = [...wrap.querySelectorAll('[data-dict-tab]')];
+        if (!tabs.length) return;
+
+        const tabsWidth = tabs.reduce((sum, btn) => sum + btn.scrollWidth + 6, 0) + 24;
+        const minWidth = 360;
+        const maxWidth = Math.max(420, Math.floor(window.innerWidth * 0.9));
+        const target = Math.min(maxWidth, Math.max(minWidth, tabsWidth));
+        explainDialog.style.width = `${target}px`;
     }
 
     function initDictionaryTabs(root) {
@@ -810,6 +822,7 @@
             panels.forEach((panel, i) => {
                 panel.style.display = i === idx ? 'block' : 'none';
             });
+            adjustExplainDialogWidthForTabs(root);
         };
 
         tabs.forEach((btn) => {
