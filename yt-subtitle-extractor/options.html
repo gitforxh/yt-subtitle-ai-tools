@@ -34,7 +34,15 @@
     <div id="openaiSection" class="hidden">
       <p class="muted">Calls OpenAI directly from extension background service worker.</p>
       <div class="row"><label>OpenAI API Key</label><input id="openaiApiKey" type="password" placeholder="sk-..." /></div>
-      <div class="row"><label>OpenAI Model</label><input id="openaiModel" placeholder="gpt-4o-mini" /></div>
+      <div class="row"><label>OpenAI Model</label>
+        <select id="openaiModel">
+          <option value="gpt-4o-mini">gpt-4o-mini (fast + affordable)</option>
+          <option value="gpt-4o">gpt-4o (higher quality)</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4.1">gpt-4.1</option>
+          <option value="o4-mini">o4-mini (reasoning)</option>
+        </select>
+      </div>
     </div>
 
     <div class="row"><label>AI Explanation Language</label>
