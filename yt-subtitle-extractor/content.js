@@ -12,6 +12,8 @@
     let hoverWasPlayingBeforePause = false;
     let hoveredTokenEl = null;
     let selectedTokenEl = null;
+    let selectedTokenEls = [];
+    let keepSelectedTokenUntil = 0;
     let lastRenderedFloatingLine = '';
 
     function createUI() {
@@ -155,6 +157,16 @@
 
     function ensureFloatingLineWindow() {
         if (!floatingLineWindow) {
+            if (!document.getElementById('yt-current-line-selection-style')) {
+                const style = document.createElement('style');
+                style.id = 'yt-current-line-selection-style';
+                style.textContent = `
+                  #yt-current-line-window ::selection { background: transparent !important; color: inherit !important; }
+                  #yt-current-line-window ::-moz-selection { background: transparent !important; color: inherit !important; }
+                `;
+                document.head.appendChild(style);
+            }
+
             floatingLineWindow = document.createElement('div');
             floatingLineWindow.id = 'yt-current-line-window';
             floatingLineWindow.style.margin = '10px 0';
@@ -180,10 +192,18 @@
                 if (!token || token === hoveredTokenEl) return;
                 clearHoveredToken();
                 hoveredTokenEl = token;
-                if (hoveredTokenEl !== selectedTokenEl) paintToken(hoveredTokenEl, 'hover');
+                if (!isTokenSelected(hoveredTokenEl)) paintToken(hoveredTokenEl, 'hover');
             });
             floatingLineText.addEventListener('mouseleave', () => {
                 clearHoveredToken();
+            });
+            floatingLineText.addEventListener('mousedown', () => {
+                // Start of drag-selection: clear old token selection immediately.
+                clearSelectedTokens();
+            });
+            floatingLineText.addEventListener('pointermove', () => {
+                // Update highlight while dragging.
+                updateSelectedTokensFromCurrentSelection();
             });
             floatingLineText.addEventListener('click', async (e) => {
                 const token = e.target?.closest?.('[data-token="1"]');
@@ -191,6 +211,7 @@
                 e.preventDefault();
                 e.stopPropagation();
                 setSelectedToken(token);
+                keepSelectedTokenUntil = Date.now() + 3000;
                 const word = (token.textContent || '').trim();
                 if (!word) return;
                 await showWordByWordExplanation(word, null, token);
@@ -267,16 +288,67 @@
         el.style.background = 'transparent';
     }
 
+    function isTokenSelected(el) {
+        return !!el && Array.isArray(selectedTokenEls) && selectedTokenEls.includes(el);
+    }
+
     function clearHoveredToken() {
         if (!hoveredTokenEl) return;
-        if (hoveredTokenEl !== selectedTokenEl) paintToken(hoveredTokenEl, 'none');
+        if (!isTokenSelected(hoveredTokenEl)) paintToken(hoveredTokenEl, 'none');
         hoveredTokenEl = null;
     }
 
+    function clearSelectedTokens() {
+        if (selectedTokenEl) paintToken(selectedTokenEl, 'none');
+        selectedTokenEl = null;
+        if (Array.isArray(selectedTokenEls) && selectedTokenEls.length) {
+            selectedTokenEls.forEach(el => {
+                if (el && el !== hoveredTokenEl) paintToken(el, 'none');
+            });
+        }
+        selectedTokenEls = [];
+    }
+
     function setSelectedToken(el) {
-        if (selectedTokenEl && selectedTokenEl !== el) paintToken(selectedTokenEl, 'none');
+        clearSelectedTokens();
         selectedTokenEl = el || null;
-        if (selectedTokenEl) paintToken(selectedTokenEl, 'selected');
+        if (selectedTokenEl) {
+            selectedTokenEls = [selectedTokenEl];
+            paintToken(selectedTokenEl, 'selected');
+        }
+    }
+
+    function setSelectedTokensFromSelection(selection) {
+        clearSelectedTokens();
+        if (!selection || !selection.rangeCount) return;
+        const range = selection.getRangeAt(0);
+        const tokens = [...floatingLineText.querySelectorAll('[data-token="1"]')];
+        const picked = tokens.filter(tok => {
+            try { return range.intersectsNode(tok); } catch { return false; }
+        });
+        if (!picked.length) return;
+        selectedTokenEls = picked;
+        selectedTokenEl = picked[0];
+        picked.forEach(tok => paintToken(tok, 'selected'));
+    }
+
+    function updateSelectedTokensFromCurrentSelection() {
+        const sel = window.getSelection?.();
+        const text = (sel?.toString() || '').trim();
+        if (!text || !sel?.anchorNode) {
+            if (selectedTokenEl && Date.now() < keepSelectedTokenUntil) return;
+            clearSelectedTokens();
+            return;
+        }
+        const anchorEl = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+        const focusEl = sel.focusNode?.nodeType === 1 ? sel.focusNode : sel.focusNode?.parentElement;
+        const inFloating = !!anchorEl?.closest?.('#yt-current-line-text') || !!focusEl?.closest?.('#yt-current-line-text');
+        if (!inFloating) {
+            if (selectedTokenEl && Date.now() < keepSelectedTokenUntil) return;
+            clearSelectedTokens();
+            return;
+        }
+        setSelectedTokensFromSelection(sel);
     }
 
     function renderFloatingLineTokens(text) {
@@ -291,7 +363,7 @@
         lastRenderedFloatingLine = value;
 
         clearHoveredToken();
-        setSelectedToken(null);
+        clearSelectedTokens();
         floatingLineText.innerHTML = '';
 
         const tokens = tokenizeWords(value);
@@ -510,7 +582,7 @@
             if (sel && sel.removeAllRanges) sel.removeAllRanges();
         } catch (_) {}
         clearHoveredToken();
-        setSelectedToken(null);
+        clearSelectedTokens();
         resumeVideoAfterExplain();
         resumeVideoAfterHoverIfNeeded();
     }
@@ -654,6 +726,10 @@
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeExplainDialog();
+        });
+
+        document.addEventListener('selectionchange', () => {
+            updateSelectedTokensFromCurrentSelection();
         });
 
         document.addEventListener('pointerdown', (e) => {
