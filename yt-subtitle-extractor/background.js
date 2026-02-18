@@ -15,11 +15,12 @@ async function callExplain(text) {
   const cfg = await getBridgeConfig();
   const helperUrl = (cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
   const sessionKey = cfg?.sessionKey || 'ext-transcript';
+  const userLanguage = (cfg?.userLanguage || 'en').trim();
 
   const res = await fetch(`${helperUrl}/explain`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, sessionKey })
+    body: JSON.stringify({ text, sessionKey, userLanguage })
   });
 
   if (!res.ok) {
@@ -75,12 +76,13 @@ async function callDictionary(text) {
   const meaning = Array.isArray(entry?.meanings) ? entry.meanings[0] : null;
   const def = Array.isArray(meaning?.definitions) ? meaning.definitions[0] : null;
   if (!entry) return [];
-  return [{
+  const item = {
     word: entry.word || oneWord,
     reading: entry.phonetic || '',
     partOfSpeech: meaning?.partOfSpeech || '',
     meaning: def?.definition || ''
-  }].filter(x => x.meaning || x.word);
+  };
+  return [item].filter(x => x.meaning || x.word);
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

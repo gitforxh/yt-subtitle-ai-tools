@@ -1,13 +1,32 @@
 <!doctype html>
 <html>
   <head><meta charset="utf-8" /><title>Settings</title>
-    <style>body{font:14px -apple-system,sans-serif;margin:20px;max-width:760px}.row{margin-bottom:12px}label{display:block;font-weight:600;margin-bottom:4px}input{width:100%;box-sizing:border-box;padding:8px}button{padding:8px 12px;margin-right:8px}.muted{color:#666;font-size:12px}#status{margin-top:10px}</style>
+    <style>body{font:14px -apple-system,sans-serif;margin:20px;max-width:760px}.row{margin-bottom:12px}label{display:block;font-weight:600;margin-bottom:4px}input,select{width:100%;box-sizing:border-box;padding:8px}button{padding:8px 12px;margin-right:8px}.muted{color:#666;font-size:12px}#status{margin-top:10px}</style>
   </head>
   <body>
     <h2>YouTube Subtitle Extractor – Local Bridge</h2>
     <p class="muted">Uses a local helper service (no browser↔gateway origin issues).</p>
     <div class="row"><label>Helper URL</label><input id="helperUrl" placeholder="http://127.0.0.1:18794" /></div>
     <div class="row"><label>Session Key</label><input id="sessionKey" placeholder="ext-transcript" /></div>
+    <div class="row"><label>AI Explanation Language</label>
+      <select id="userLanguage">
+        <option value="en">English</option>
+        <option value="zh-CN">中文（简体）</option>
+        <option value="zh-TW">中文（繁體）</option>
+        <option value="ja">日本語</option>
+        <option value="ko">한국어</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="it">Italiano</option>
+        <option value="pt">Português</option>
+        <option value="ru">Русский</option>
+        <option value="ar">العربية</option>
+        <option value="hi">हिन्दी</option>
+        <option value="th">ไทย</option>
+        <option value="vi">Tiếng Việt</option>
+      </select>
+    </div>
     <div class="row"><button id="saveBtn">Save</button><button id="connectBtn">Connect</button><button id="checkBtn">Check</button></div>
     <div class="muted">Run helper: <code>node /Users/xhuang/work/openclaw/workspace/yt-explain-bridge.js</code></div>
     <div id="status"></div>

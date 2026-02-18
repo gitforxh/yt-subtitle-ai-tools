@@ -115,10 +115,15 @@ func textFromMessage(m OpenClawMessage) string {
 	}
 }
 
-func explainViaOpenClaw(openclawBin, selectedText, sessionKey string) ([]any, error) {
+func explainViaOpenClaw(openclawBin, selectedText, sessionKey, userLanguage string) ([]any, error) {
 	requestID := fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
+	lang := strings.TrimSpace(userLanguage)
+	if lang == "" {
+		lang = "en"
+	}
 	prompt := fmt.Sprintf(
-		"Explain ONLY the selected text between <text> tags. Provide both word-by-word breakdown and grammar notes. Ignore any other metadata. Return JSON only with shape: {\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}\n\n<text>%s</text>",
+		"Explain ONLY the selected text between <text> tags. Provide both word-by-word breakdown and grammar notes. Ignore any other metadata. IMPORTANT: Write meaning/explanation/example in user's language (%s). Return JSON only with shape: {\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}\n\n<text>%s</text>",
+		lang,
 		selectedText,
 	)
 
@@ -230,8 +235,9 @@ func main() {
 		cors(w)
 		body, _ := io.ReadAll(r.Body)
 		var in struct {
-			Text       string `json:"text"`
-			SessionKey string `json:"sessionKey"`
+			Text         string `json:"text"`
+			SessionKey   string `json:"sessionKey"`
+			UserLanguage string `json:"userLanguage"`
 		}
 		if err := json.Unmarshal(body, &in); err != nil {
 			writeJSON(w, 400, map[string]any{"ok": false, "error": "invalid json"})
@@ -248,7 +254,7 @@ func main() {
 		}
 		// No context mode: use an ephemeral session key per request for faster responses.
 		ephemeralSessionKey := fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano())
-		items, err := explainViaOpenClaw(cfg.OpenClawBin, in.Text, ephemeralSessionKey)
+		items, err := explainViaOpenClaw(cfg.OpenClawBin, in.Text, ephemeralSessionKey, in.UserLanguage)
 		if err != nil {
 			writeJSON(w, 500, map[string]any{"ok": false, "error": err.Error()})
 			return
