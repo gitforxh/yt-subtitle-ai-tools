@@ -96,16 +96,69 @@ function tokenizeQuery(text) {
     seen.add(key);
     deduped.push(p);
   }
-  return deduped.slice(0, 8);
+  return deduped.slice(0, 5);
+}
+
+const dictTokenCache = new Map();
+const DICT_CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_CONCURRENT_LOOKUPS = 2;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.status === 429 && i < attempts - 1) {
+        const waitMs = 300 * Math.pow(2, i) + Math.floor(Math.random() * 120);
+        await sleep(waitMs);
+        continue;
+      }
+      if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        const waitMs = 250 * Math.pow(2, i) + Math.floor(Math.random() * 100);
+        await sleep(waitMs);
+        continue;
+      }
+    }
+  }
+  throw lastErr || new Error('Dictionary request failed');
+}
+
+function getDictCacheKey(prefix, token) {
+  return `${prefix}:${String(token || '').trim().toLowerCase()}`;
+}
+
+function getCachedDict(key) {
+  const hit = dictTokenCache.get(key);
+  if (!hit) return null;
+  if ((Date.now() - hit.ts) > DICT_CACHE_TTL_MS) {
+    dictTokenCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function setCachedDict(key, value) {
+  dictTokenCache.set(key, { ts: Date.now(), value });
 }
 
 async function lookupJapanese(token) {
+  const cacheKey = getDictCacheKey('jp', token);
+  const cached = getCachedDict(cacheKey);
+  if (cached) return cached;
+
   const url = `https://jisho.org/api/v1/search/words?keyword=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   const rows = Array.isArray(data?.data) ? data.data : [];
-  return rows.slice(0, 4).map((r) => {
+  const items = rows.slice(0, 4).map((r) => {
     const japanese = Array.isArray(r?.japanese) ? r.japanese[0] : null;
     const senses = Array.isArray(r?.senses) ? r.senses[0] : null;
     return {
@@ -115,23 +168,30 @@ async function lookupJapanese(token) {
       meaning: Array.isArray(senses?.english_definitions) ? senses.english_definitions.slice(0, 4).join('; ') : ''
     };
   }).filter(x => x.meaning || x.word);
+  setCachedDict(cacheKey, items);
+  return items;
 }
 
 async function lookupEnglish(token) {
+  const cacheKey = getDictCacheKey('en', token);
+  const cached = getCachedDict(cacheKey);
+  if (cached) return cached;
+
   const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   const entry = Array.isArray(data) ? data[0] : null;
   const meaning = Array.isArray(entry?.meanings) ? entry.meanings[0] : null;
   const def = Array.isArray(meaning?.definitions) ? meaning.definitions[0] : null;
   if (!entry) return [];
-  return [{
+  const items = [{
     word: entry.word || token,
     reading: entry.phonetic || '',
     partOfSpeech: meaning?.partOfSpeech || '',
     meaning: def?.definition || ''
   }].filter(x => x.meaning || x.word);
+  setCachedDict(cacheKey, items);
+  return items;
 }
 
 async function callDictionary(text) {
@@ -141,14 +201,19 @@ async function callDictionary(text) {
   const tokens = tokenizeQuery(q);
   const useTokens = tokens.length > 1 ? tokens : [q];
 
-  const groups = await Promise.all(useTokens.map(async (token) => {
-    try {
-      const items = hasJapanese(token) ? await lookupJapanese(token) : await lookupEnglish(token);
-      return { token, items };
-    } catch (err) {
-      return { token, items: [], error: err?.message || 'Lookup failed' };
-    }
-  }));
+  const groups = [];
+  for (let i = 0; i < useTokens.length; i += MAX_CONCURRENT_LOOKUPS) {
+    const batch = useTokens.slice(i, i + MAX_CONCURRENT_LOOKUPS);
+    const partial = await Promise.all(batch.map(async (token) => {
+      try {
+        const items = hasJapanese(token) ? await lookupJapanese(token) : await lookupEnglish(token);
+        return { token, items };
+      } catch (err) {
+        return { token, items: [], error: err?.message || 'Lookup failed' };
+      }
+    }));
+    groups.push(...partial);
+  }
 
   const items = groups.flatMap(g => g.items || []);
   return { items, groups };
