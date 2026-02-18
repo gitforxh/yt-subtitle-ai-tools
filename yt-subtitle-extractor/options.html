@@ -1,13 +1,42 @@
 <!doctype html>
 <html>
-  <head><meta charset="utf-8" /><title>Settings</title>
-    <style>body{font:14px -apple-system,sans-serif;margin:20px;max-width:760px}.row{margin-bottom:12px}label{display:block;font-weight:600;margin-bottom:4px}input,select{width:100%;box-sizing:border-box;padding:8px}button{padding:8px 12px;margin-right:8px}.muted{color:#666;font-size:12px}#status{margin-top:10px}</style>
+  <head>
+    <meta charset="utf-8" />
+    <title>Settings</title>
+    <style>
+      body { font: 14px -apple-system, sans-serif; margin: 20px; max-width: 760px; }
+      .row { margin-bottom: 12px; }
+      label { display: block; font-weight: 600; margin-bottom: 4px; }
+      input, select { width: 100%; box-sizing: border-box; padding: 8px; }
+      button { padding: 8px 12px; margin-right: 8px; }
+      .muted { color: #666; font-size: 12px; }
+      #status { margin-top: 10px; }
+      .hidden { display: none; }
+    </style>
   </head>
   <body>
-    <h2>YouTube Subtitle Extractor – Local Bridge</h2>
-    <p class="muted">Uses a local helper service (no browser↔gateway origin issues).</p>
-    <div class="row"><label>Helper URL</label><input id="helperUrl" placeholder="http://127.0.0.1:18794" /></div>
-    <div class="row"><label>Session Key</label><input id="sessionKey" placeholder="ext-transcript" /></div>
+    <h2>YouTube Subtitle Extractor – AI Settings</h2>
+
+    <div class="row">
+      <label>AI Provider</label>
+      <select id="aiProvider">
+        <option value="openclaw">OpenClaw (Local Helper)</option>
+        <option value="openai">OpenAI (Direct API)</option>
+      </select>
+    </div>
+
+    <div id="openclawSection">
+      <p class="muted">Uses a local helper service (stable + local bridge mode).</p>
+      <div class="row"><label>Helper URL</label><input id="helperUrl" placeholder="http://127.0.0.1:18794" /></div>
+      <div class="row"><label>Session Key</label><input id="sessionKey" placeholder="ext-transcript" /></div>
+    </div>
+
+    <div id="openaiSection" class="hidden">
+      <p class="muted">Calls OpenAI directly from extension background service worker.</p>
+      <div class="row"><label>OpenAI API Key</label><input id="openaiApiKey" type="password" placeholder="sk-..." /></div>
+      <div class="row"><label>OpenAI Model</label><input id="openaiModel" placeholder="gpt-4o-mini" /></div>
+    </div>
+
     <div class="row"><label>AI Explanation Language</label>
       <select id="userLanguage">
         <option value="en">English</option>
@@ -27,9 +56,16 @@
         <option value="vi">Tiếng Việt</option>
       </select>
     </div>
-    <div class="row"><button id="saveBtn">Save</button><button id="connectBtn">Connect</button><button id="checkBtn">Check</button></div>
-    <div class="muted">Run helper: <code>node /Users/xhuang/work/openclaw/workspace/yt-explain-bridge.js</code></div>
+
+    <div class="row">
+      <button id="saveBtn">Save</button>
+      <button id="connectBtn">Connect / Validate</button>
+      <button id="checkBtn">Check</button>
+    </div>
+
+    <div class="muted">OpenClaw helper path: <code>/Users/xhuang/work/workspace/yt-subtitle-ai-tools/yt-explain-go/yt-explain-go</code></div>
     <div id="status"></div>
+
     <script src="options.js"></script>
   </body>
 </html>

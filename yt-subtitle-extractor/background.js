@@ -13,32 +13,119 @@ async function getBridgeConfig() {
 
 const inflightExplainRequests = new Map();
 
-async function callExplain(text, requestId) {
-  const cfg = await getBridgeConfig();
+function mergeGrammarIntoItems(parsed) {
+  let items = Array.isArray(parsed?.items) ? parsed.items : [];
+  const grammar = Array.isArray(parsed?.grammar) ? parsed.grammar : [];
+  if (grammar.length) {
+    items = [...items, { word: '— Grammar —', reading: '', partOfSpeech: '', meaning: '' }];
+    for (const g of grammar) {
+      const pattern = String(g?.pattern || '').trim();
+      const explanation = String(g?.explanation || '').trim();
+      const example = String(g?.example || '').trim();
+      items.push({
+        word: pattern,
+        reading: 'grammar',
+        partOfSpeech: 'pattern',
+        meaning: `${explanation}${example ? ` Example: ${example}` : ''}`.trim()
+      });
+    }
+  }
+  return items;
+}
+
+function extractFirstJsonObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) {}
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(raw.slice(start, end + 1)); } catch (_) {}
+  }
+  return null;
+}
+
+async function callExplainViaOpenClaw(cfg, text, rid, controller) {
   const helperUrl = (cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
   const sessionKey = cfg?.sessionKey || 'ext-transcript';
   const userLanguage = (cfg?.userLanguage || 'en').trim();
 
+  inflightExplainRequests.set(rid, { controller, helperUrl, provider: 'openclaw' });
+
+  const res = await fetch(`${helperUrl}/explain`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, sessionKey, userLanguage, requestId: rid }),
+    signal: controller.signal
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Helper failed: ${res.status} ${txt.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  if (!data?.ok) throw new Error(data?.error || 'Helper error');
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+async function callExplainViaOpenAI(cfg, text, rid, controller) {
+  const apiKey = String(cfg?.openaiApiKey || '').trim();
+  if (!apiKey) throw new Error('Missing OpenAI API key in settings');
+
+  const model = String(cfg?.openaiModel || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
+  const userLanguage = String(cfg?.userLanguage || 'en').trim() || 'en';
+  inflightExplainRequests.set(rid, { controller, provider: 'openai' });
+
+  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context. Write meaning/explanation/example in user language (${userLanguage}). Return JSON only with shape: {"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}\n\n<text>${text}</text>`;
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: 'Return strict JSON only. No markdown.' },
+        { role: 'user', content: prompt }
+      ]
+    }),
+    signal: controller.signal
+  });
+
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`OpenAI failed: ${res.status} ${raw.slice(0, 220)}`);
+
+  const payload = extractFirstJsonObject((() => {
+    try {
+      const obj = JSON.parse(raw);
+      return obj?.choices?.[0]?.message?.content || '';
+    } catch (_) {
+      return raw;
+    }
+  })());
+
+  if (!payload || String(payload.requestId || '').trim() !== rid) {
+    throw new Error('OpenAI response invalid or requestId mismatch');
+  }
+
+  return mergeGrammarIntoItems(payload);
+}
+
+async function callExplain(text, requestId) {
+  const cfg = await getBridgeConfig();
+  const provider = (cfg?.aiProvider || 'openclaw').toLowerCase();
   const rid = String(requestId || `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const controller = new AbortController();
-  inflightExplainRequests.set(rid, { controller, helperUrl });
 
   try {
-    const res = await fetch(`${helperUrl}/explain`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, sessionKey, userLanguage, requestId: rid }),
-      signal: controller.signal
-    });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`Helper failed: ${res.status} ${txt.slice(0, 200)}`);
+    if (provider === 'openai') {
+      return await callExplainViaOpenAI(cfg, text, rid, controller);
     }
-
-    const data = await res.json();
-    if (!data?.ok) throw new Error(data?.error || 'Helper error');
-    return Array.isArray(data.items) ? data.items : [];
+    return await callExplainViaOpenClaw(cfg, text, rid, controller);
   } finally {
     inflightExplainRequests.delete(rid);
   }
@@ -53,16 +140,18 @@ async function cancelExplain(requestId) {
     try { current.controller.abort(); } catch (_) {}
   }
 
-  const cfg = await getBridgeConfig();
-  const helperUrl = (current?.helperUrl || cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
-  try {
-    await fetch(`${helperUrl}/abort`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId: rid })
-    });
-  } catch (_) {
-    // best effort
+  if ((current?.provider || 'openclaw') === 'openclaw') {
+    const cfg = await getBridgeConfig();
+    const helperUrl = (current?.helperUrl || cfg?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
+    try {
+      await fetch(`${helperUrl}/abort`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: rid })
+      });
+    } catch (_) {
+      // best effort
+    }
   }
 
   inflightExplainRequests.delete(rid);
@@ -70,6 +159,19 @@ async function cancelExplain(requestId) {
 }
 
 async function testBridge(config) {
+  const provider = (config?.aiProvider || 'openclaw').toLowerCase();
+
+  if (provider === 'openai') {
+    const apiKey = String(config?.openaiApiKey || '').trim();
+    if (!apiKey) throw new Error('Missing OpenAI API key');
+    const res = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (!res.ok) throw new Error(`OpenAI auth failed: ${res.status}`);
+    await setStorage({ bridgeConfig: config, bridgeConnected: true });
+    return true;
+  }
+
   const helperUrl = (config?.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
   const res = await fetch(`${helperUrl}/health`);
   if (!res.ok) throw new Error(`Bridge health failed: ${res.status}`);
@@ -229,7 +331,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       if (msg?.type === 'bridge:status') {
         const data = await getStorage(['bridgeConnected', 'bridgeConfig']);
-        sendResponse({ ok: true, connected: !!data.bridgeConnected, config: data.bridgeConfig || null });
+        const config = data.bridgeConfig || {};
+        const provider = (config.aiProvider || 'openclaw').toLowerCase();
+
+        if (provider === 'openai') {
+          const connected = !!String(config.openaiApiKey || '').trim();
+          sendResponse({ ok: true, connected, config });
+          return;
+        }
+
+        const helperUrl = (config.helperUrl || 'http://127.0.0.1:18794').replace(/\/$/, '');
+        let connected = false;
+        try {
+          const r = await fetch(`${helperUrl}/health`);
+          connected = !!r.ok;
+        } catch (_) {
+          connected = false;
+        }
+        sendResponse({ ok: true, connected, config });
         return;
       }
       if (msg?.type === 'dict:lookup') {
