@@ -755,16 +755,71 @@
 
     function renderDictionaryGroups(groups) {
         if (!Array.isArray(groups) || !groups.length) return 'No results.';
-        return groups.map((g) => {
+
+        const tabButtons = groups.map((g, idx) => {
             const token = String(g.token || '').replace(/</g, '&lt;');
+            const active = idx === 0;
+            return `<button data-dict-tab="${idx}" style="
+                appearance:none;
+                border:1px solid ${active ? 'rgba(196,140,255,0.75)' : 'rgba(196,140,255,0.35)'};
+                border-bottom:${active ? '1px solid rgba(72,38,108,0.95)' : '1px solid rgba(196,140,255,0.35)'};
+                background:${active ? 'rgba(96,56,140,0.92)' : 'rgba(255,255,255,0.04)'};
+                color:#fff;
+                padding:6px 10px;
+                border-top-left-radius:8px;
+                border-top-right-radius:8px;
+                margin-right:4px;
+                cursor:pointer;
+                font-weight:${active ? '700' : '500'};
+                max-width:140px;
+                white-space:nowrap;
+                overflow:hidden;
+                text-overflow:ellipsis;
+            ">${token}</button>`;
+        }).join('');
+
+        const tabPanels = groups.map((g, idx) => {
             const body = (Array.isArray(g.items) && g.items.length)
                 ? renderExplainItems(g.items)
                 : `<div style="opacity:.8;">${String(g.error || 'No result').replace(/</g, '&lt;')}</div>`;
-            return `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(196,140,255,0.35);border-radius:8px;background:rgba(255,255,255,0.03);">
-                <div style="font-weight:700;margin-bottom:6px;">Token: ${token}</div>
-                ${body}
-            </div>`;
+            return `<div data-dict-panel="${idx}" style="display:${idx === 0 ? 'block' : 'none'};padding:10px;border:1px solid rgba(196,140,255,0.35);border-radius:0 8px 8px 8px;background:rgba(255,255,255,0.03);">${body}</div>`;
         }).join('');
+
+        return `
+            <div data-dict-tabs-wrap>
+                <div style="display:flex;align-items:flex-end;overflow-x:auto;overflow-y:hidden;padding-bottom:0;">${tabButtons}</div>
+                <div>${tabPanels}</div>
+            </div>
+        `;
+    }
+
+    function initDictionaryTabs(root) {
+        if (!root) return;
+        const tabs = [...root.querySelectorAll('[data-dict-tab]')];
+        const panels = [...root.querySelectorAll('[data-dict-panel]')];
+        if (!tabs.length || !panels.length) return;
+
+        const activate = (idx) => {
+            tabs.forEach((btn, i) => {
+                const active = i === idx;
+                btn.style.border = `1px solid ${active ? 'rgba(196,140,255,0.75)' : 'rgba(196,140,255,0.35)'}`;
+                btn.style.borderBottom = active ? '1px solid rgba(72,38,108,0.95)' : '1px solid rgba(196,140,255,0.35)';
+                btn.style.background = active ? 'rgba(96,56,140,0.92)' : 'rgba(255,255,255,0.04)';
+                btn.style.fontWeight = active ? '700' : '500';
+            });
+            panels.forEach((panel, i) => {
+                panel.style.display = i === idx ? 'block' : 'none';
+            });
+        };
+
+        tabs.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-dict-tab') || '0');
+                activate(Number.isFinite(idx) ? idx : 0);
+            });
+        });
+
+        activate(0);
     }
 
     async function showWordByWordExplanation(text, selection, anchorEl) {
@@ -810,6 +865,7 @@
             const dictData = await fetchDictionaryFirst(text);
             if (Array.isArray(dictData.groups) && dictData.groups.length) {
                 dictList.innerHTML = renderDictionaryGroups(dictData.groups);
+                initDictionaryTabs(dictList);
             } else {
                 dictList.innerHTML = renderExplainItems(dictData.items || []);
             }
