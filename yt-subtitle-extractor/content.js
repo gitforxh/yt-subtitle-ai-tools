@@ -10,6 +10,9 @@
     let lastFloatingLine = '—';
     let hoverPausedVideo = null;
     let hoverWasPlayingBeforePause = false;
+    let hoveredTokenEl = null;
+    let selectedTokenEl = null;
+    let lastRenderedFloatingLine = '';
 
     function createUI() {
         if (subtitleWindow) return;
@@ -170,6 +173,28 @@
             floatingLineText = document.createElement('div');
             floatingLineText.id = 'yt-current-line-text';
             floatingLineText.textContent = '—';
+            floatingLineText.style.cursor = 'text';
+
+            floatingLineText.addEventListener('mousemove', (e) => {
+                const token = e.target?.closest?.('[data-token="1"]');
+                if (!token || token === hoveredTokenEl) return;
+                clearHoveredToken();
+                hoveredTokenEl = token;
+                if (hoveredTokenEl !== selectedTokenEl) paintToken(hoveredTokenEl, 'hover');
+            });
+            floatingLineText.addEventListener('mouseleave', () => {
+                clearHoveredToken();
+            });
+            floatingLineText.addEventListener('click', async (e) => {
+                const token = e.target?.closest?.('[data-token="1"]');
+                if (!token) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setSelectedToken(token);
+                const word = (token.textContent || '').trim();
+                if (!word) return;
+                await showWordByWordExplanation(word, null, token);
+            });
 
             floatingLineWindow.appendChild(floatingLineText);
 
@@ -208,11 +233,90 @@
         return floatingLineWindow;
     }
 
+    function tokenizeWords(text) {
+        const t = String(text || '').trim();
+        if (!t) return [];
+        try {
+            if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+                const seg = new Intl.Segmenter(undefined, { granularity: 'word' });
+                const out = [];
+                for (const s of seg.segment(t)) {
+                    const token = String(s.segment || '');
+                    if (!token.trim()) continue;
+                    out.push(token);
+                }
+                if (out.length) return out;
+            }
+        } catch (_) {}
+        return t.split(/\s+/).filter(Boolean);
+    }
+
+    function paintToken(el, mode) {
+        if (!el) return;
+        if (mode === 'selected') {
+            el.style.outline = '2px solid rgba(255,170,60,1)';
+            el.style.background = 'rgba(255,140,0,0.42)';
+            return;
+        }
+        if (mode === 'hover') {
+            el.style.outline = '1px solid rgba(120,180,255,0.95)';
+            el.style.background = 'rgba(120,180,255,0.22)';
+            return;
+        }
+        el.style.outline = 'none';
+        el.style.background = 'transparent';
+    }
+
+    function clearHoveredToken() {
+        if (!hoveredTokenEl) return;
+        if (hoveredTokenEl !== selectedTokenEl) paintToken(hoveredTokenEl, 'none');
+        hoveredTokenEl = null;
+    }
+
+    function setSelectedToken(el) {
+        if (selectedTokenEl && selectedTokenEl !== el) paintToken(selectedTokenEl, 'none');
+        selectedTokenEl = el || null;
+        if (selectedTokenEl) paintToken(selectedTokenEl, 'selected');
+    }
+
+    function renderFloatingLineTokens(text) {
+        ensureFloatingLineWindow();
+        const source = (text || '').trim();
+        const value = source || lastFloatingLine || '—';
+
+        // Avoid rebuilding DOM for identical line; keeps selected-token frame stable.
+        if (value === lastRenderedFloatingLine && floatingLineText.childNodes.length > 0) {
+            return;
+        }
+        lastRenderedFloatingLine = value;
+
+        clearHoveredToken();
+        setSelectedToken(null);
+        floatingLineText.innerHTML = '';
+
+        const tokens = tokenizeWords(value);
+        if (!tokens.length) {
+            floatingLineText.textContent = value;
+            return;
+        }
+
+        tokens.forEach((tok, idx) => {
+            const span = document.createElement('span');
+            span.textContent = tok;
+            span.dataset.token = '1';
+            span.style.padding = '0 2px';
+            span.style.borderRadius = '4px';
+            span.style.transition = 'outline-color .08s ease, background-color .08s ease';
+            floatingLineText.appendChild(span);
+            if (idx < tokens.length - 1) floatingLineText.appendChild(document.createTextNode(' '));
+        });
+    }
+
     function setFloatingLineText(text) {
         ensureFloatingLineWindow();
         const next = (text || '').trim();
         if (next) lastFloatingLine = next;
-        floatingLineText.textContent = next || lastFloatingLine || '—';
+        renderFloatingLineTokens(next || lastFloatingLine || '—');
     }
 
     function findCueByMs(ms) {
@@ -405,16 +509,21 @@
             const sel = window.getSelection?.();
             if (sel && sel.removeAllRanges) sel.removeAllRanges();
         } catch (_) {}
+        clearHoveredToken();
+        setSelectedToken(null);
         resumeVideoAfterExplain();
         resumeVideoAfterHoverIfNeeded();
     }
 
-    function positionExplainDialogNearSelection(dialog, selection) {
+    function positionExplainDialogNearSelection(dialog, selection, anchorEl) {
         const GAP = 10;
         const MARGIN = 8;
 
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-        const rect = range?.getBoundingClientRect?.();
+        let rect = range?.getBoundingClientRect?.();
+        if ((!rect || (!rect.width && !rect.height)) && anchorEl?.getBoundingClientRect) {
+            rect = anchorEl.getBoundingClientRect();
+        }
         if (!rect || (!rect.width && !rect.height)) {
             // Fallback position
             dialog.style.left = '20px';
@@ -458,7 +567,7 @@
         }).join('');
     }
 
-    async function showWordByWordExplanation(text, selection) {
+    async function showWordByWordExplanation(text, selection, anchorEl) {
         if (!text || !text.trim()) return;
 
         const dialog = ensureExplainDialog();
@@ -481,7 +590,7 @@
             <div id="yt-explain-list"></div>
         `;
 
-        positionExplainDialogNearSelection(dialog, selection);
+        positionExplainDialogNearSelection(dialog, selection, anchorEl);
 
         const closeBtn = dialog.querySelector('#yt-explain-close');
         if (closeBtn) {
@@ -503,7 +612,7 @@
         } catch (err) {
             dictList.innerHTML = `Dictionary error: ${(err?.message || 'Failed').replace(/</g, '&lt;')}`;
         }
-        positionExplainDialogNearSelection(dialog, selection);
+        positionExplainDialogNearSelection(dialog, selection, anchorEl);
 
         if (aiBtn) {
             aiBtn.onclick = async () => {
@@ -514,7 +623,7 @@
                     const items = await fetchAIWordByWordExplanation(text);
                     list.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">AI</div>${renderExplainItems(items)}`;
                     aiStatus.textContent = '';
-                    positionExplainDialogNearSelection(dialog, selection);
+                    positionExplainDialogNearSelection(dialog, selection, anchorEl);
                 } catch (err) {
                     list.innerHTML = `AI error: ${(err?.message || 'Failed').replace(/</g, '&lt;')}`;
                     aiStatus.textContent = '';
@@ -540,7 +649,7 @@
             const inTranscript = !!anchorElement?.closest?.('#yt-current-line-window, ytd-transcript-renderer, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"], ytd-transcript-segment-renderer');
             if (!inTranscript) return;
 
-            await showWordByWordExplanation(text, selection);
+            await showWordByWordExplanation(text, selection, anchorElement);
         });
 
         document.addEventListener('keydown', (e) => {
