@@ -169,8 +169,9 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 		lang = "en"
 	}
 	prompt := fmt.Sprintf(
-		"Task: Explain ONLY the selected text between <text> tags. Treat this as a standalone request and do not rely on any previous conversation context. Provide both word-by-word breakdown and grammar notes. IMPORTANT: Write meaning/explanation/example in user's language (%s). Return JSON only with shape: {\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}\n\n<text>%s</text>",
+		"Task: Explain ONLY the selected text between <text> tags. Treat this as a standalone request and do not rely on any previous conversation context. Provide both word-by-word breakdown and grammar notes. IMPORTANT: Write meaning/explanation/example in user's language (%s). Return JSON only with shape: {\"requestId\":\"%s\",\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}. The requestId must exactly match the given requestId.\n\n<text>%s</text>",
 		lang,
+		requestID,
 		selectedText,
 	)
 
@@ -212,6 +213,10 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 				if start >= 0 && end > start {
 					_ = json.Unmarshal([]byte(text[start:end+1]), &parsed)
 				}
+			}
+			rid, ok := parsed["requestId"].(string)
+			if !ok || strings.TrimSpace(rid) != strings.TrimSpace(requestID) {
+				continue
 			}
 			if items, ok := parsed["items"].([]any); ok {
 				if grammar, gok := parsed["grammar"].([]any); gok && len(grammar) > 0 {
