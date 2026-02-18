@@ -902,7 +902,7 @@
                     if (!activeAIRequestInFlight || activeAIRequestId !== rid || !explainDialog || explainDialog.style.display === 'none') {
                         return;
                     }
-                    list.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">AI</div>${renderExplainItems(items)}`;
+                    list.innerHTML = `<div style="font-weight:600;margin-bottom:4px;">AI Explanation</div>${renderExplainItems(items)}`;
                     aiStatus.textContent = '';
                     positionExplainDialogNearSelection(dialog, selection, anchorEl);
                 } catch (err) {
