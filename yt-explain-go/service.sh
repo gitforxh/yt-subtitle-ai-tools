@@ -3,7 +3,7 @@ set -euo pipefail
 
 LABEL="com.xhuang.yt-explain-go"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-PROJECT_DIR="/Users/xhuang/work/workspace/yt-explain-go"
+PROJECT_DIR="/Users/xhuang/work/workspace/yt-subtitle-ai-tools/yt-explain-go"
 BIN="$PROJECT_DIR/yt-explain-go"
 GUI_DOMAIN="gui/$(id -u)"
 
@@ -24,7 +24,7 @@ install_plist() {
     <string>com.xhuang.yt-explain-go</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/xhuang/work/workspace/yt-explain-go/yt-explain-go</string>
+      <string>/Users/xhuang/work/workspace/yt-subtitle-ai-tools/yt-explain-go/yt-explain-go</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/xhuang/work/openclaw/workspace</string>

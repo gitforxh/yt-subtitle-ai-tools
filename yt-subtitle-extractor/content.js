@@ -3,6 +3,13 @@
     let subtitleContent = null;
     let trackList = null;
     let currentTracks = [];
+    let currentCues = [];
+    let activeVideo = null;
+    let floatingLineWindow = null;
+    let floatingLineText = null;
+    let lastFloatingLine = '—';
+    let hoverPausedVideo = null;
+    let hoverWasPlayingBeforePause = false;
 
     function createUI() {
         if (subtitleWindow) return;
@@ -66,6 +73,7 @@
         subtitleWindow.appendChild(subtitleContent);
         subtitleWindow.style.display = 'none'; // keep extension UI hidden (user prefers native right sidebar transcript)
         document.body.appendChild(subtitleWindow);
+        ensureFloatingLineWindow();
 
         // Make it draggable
         let isDragging = false;
@@ -140,6 +148,150 @@
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function ensureFloatingLineWindow() {
+        if (!floatingLineWindow) {
+            floatingLineWindow = document.createElement('div');
+            floatingLineWindow.id = 'yt-current-line-window';
+            floatingLineWindow.style.margin = '10px 0';
+            floatingLineWindow.style.padding = '10px 12px';
+            floatingLineWindow.style.borderRadius = '10px';
+            floatingLineWindow.style.background = 'rgba(66, 133, 244, 0.20)';
+            floatingLineWindow.style.border = '1px solid rgba(120, 180, 255, 0.55)';
+            floatingLineWindow.style.color = 'var(--yt-spec-text-primary, #fff)';
+            floatingLineWindow.style.fontSize = '38px';
+            floatingLineWindow.style.lineHeight = '1.6';
+            floatingLineWindow.style.userSelect = 'text';
+            floatingLineWindow.style.whiteSpace = 'pre-wrap';
+            floatingLineWindow.style.display = 'block';
+            floatingLineWindow.style.textAlign = 'center';
+
+            floatingLineText = document.createElement('div');
+            floatingLineText.id = 'yt-current-line-text';
+            floatingLineText.textContent = '—';
+
+            floatingLineWindow.appendChild(floatingLineText);
+
+            floatingLineWindow.addEventListener('mouseenter', () => {
+                const video = getActiveVideoElement();
+                if (!video) return;
+                hoverPausedVideo = video;
+                hoverWasPlayingBeforePause = !video.paused && !video.ended;
+                if (hoverWasPlayingBeforePause) {
+                    try { video.pause(); } catch (_) {}
+                }
+            });
+
+            floatingLineWindow.addEventListener('mouseleave', () => {
+                if (!hoverPausedVideo) return;
+                // If explain popup is open, keep paused until popup closes.
+                if (explainDialog && explainDialog.style.display !== 'none') return;
+                if (hoverWasPlayingBeforePause) {
+                    try {
+                        const p = hoverPausedVideo.play?.();
+                        if (p && typeof p.catch === 'function') p.catch(() => {});
+                    } catch (_) {}
+                }
+                hoverPausedVideo = null;
+                hoverWasPlayingBeforePause = false;
+            });
+        }
+
+        if (!floatingLineWindow.isConnected) {
+            const mount = document.querySelector('#below') || document.querySelector('#meta') || document.querySelector('#primary-inner');
+            if (mount) {
+                mount.prepend(floatingLineWindow);
+            }
+        }
+
+        return floatingLineWindow;
+    }
+
+    function setFloatingLineText(text) {
+        ensureFloatingLineWindow();
+        const next = (text || '').trim();
+        if (next) lastFloatingLine = next;
+        floatingLineText.textContent = next || lastFloatingLine || '—';
+    }
+
+    function findCueByMs(ms) {
+        if (!Array.isArray(currentCues) || !currentCues.length) return null;
+        const exact = currentCues.find(c => ms >= c.startMs && ms <= c.endMs);
+        if (exact) return exact;
+        // Fallback: nearest cue that already started (handles tiny timing gaps)
+        let prev = null;
+        for (const c of currentCues) {
+            if (c.startMs <= ms) prev = c;
+            else break;
+        }
+        return prev;
+    }
+
+    function getLiveCaptionText() {
+        const segs = [...document.querySelectorAll('.ytp-caption-window-container .ytp-caption-segment')]
+            .map(el => (el.textContent || '').trim())
+            .filter(Boolean);
+        if (!segs.length) return '';
+        return segs.join(' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function parseTranscriptTimeToMs(raw) {
+        const t = String(raw || '').trim();
+        if (!t) return NaN;
+        const parts = t.split(':').map(x => Number(x));
+        if (parts.some(n => !Number.isFinite(n))) return NaN;
+        if (parts.length === 3) return ((parts[0] * 3600) + (parts[1] * 60) + parts[2]) * 1000;
+        if (parts.length === 2) return ((parts[0] * 60) + parts[1]) * 1000;
+        if (parts.length === 1) return parts[0] * 1000;
+        return NaN;
+    }
+
+    function getActiveTranscriptPanelLineByTime(currentMs) {
+        const rows = [...document.querySelectorAll('ytd-transcript-segment-renderer')];
+        if (!rows.length) return '';
+
+        let best = '';
+        let bestMs = -1;
+        for (const row of rows) {
+            const tsEl = row.querySelector('.segment-timestamp') || row.querySelector('#start-time') || row.querySelector('yt-formatted-string.segment-timestamp');
+            const txEl = row.querySelector('.segment-text') || row.querySelector('yt-formatted-string.segment-text');
+            const text = (txEl?.textContent || '').trim();
+            if (!text) continue;
+            const tms = parseTranscriptTimeToMs(tsEl?.textContent || '');
+            if (!Number.isFinite(tms)) continue;
+            if (tms <= currentMs && tms >= bestMs) {
+                bestMs = tms;
+                best = text;
+            }
+        }
+        return best;
+    }
+
+    function handleVideoTimeUpdate() {
+        if (!activeVideo) return;
+        const ms = Math.floor((activeVideo.currentTime || 0) * 1000);
+        const panel = getActiveTranscriptPanelLineByTime(ms);
+        const cue = findCueByMs(ms);
+        const live = getLiveCaptionText();
+        // Prefer right transcript line by time, then timed cue, and only then live CC text.
+        setFloatingLineText(panel || cue?.text || live || '');
+    }
+
+    function bindVideoTimeSync() {
+        const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+        if (!video) return;
+        if (activeVideo === video) return;
+
+        if (activeVideo) {
+            activeVideo.removeEventListener('timeupdate', handleVideoTimeUpdate);
+            activeVideo.removeEventListener('seeked', handleVideoTimeUpdate);
+        }
+
+        activeVideo = video;
+        activeVideo.addEventListener('timeupdate', handleVideoTimeUpdate);
+        activeVideo.addEventListener('seeked', handleVideoTimeUpdate);
+        handleVideoTimeUpdate();
     }
 
     let explainDialog = null;
@@ -235,6 +387,18 @@
         explainWasPlayingBeforeOpen = false;
     }
 
+    function resumeVideoAfterHoverIfNeeded() {
+        if (!hoverPausedVideo) return;
+        if (hoverWasPlayingBeforePause) {
+            try {
+                const p = hoverPausedVideo.play?.();
+                if (p && typeof p.catch === 'function') p.catch(() => {});
+            } catch (_) {}
+        }
+        hoverPausedVideo = null;
+        hoverWasPlayingBeforePause = false;
+    }
+
     function closeExplainDialog() {
         if (explainDialog) explainDialog.style.display = 'none';
         try {
@@ -242,6 +406,7 @@
             if (sel && sel.removeAllRanges) sel.removeAllRanges();
         } catch (_) {}
         resumeVideoAfterExplain();
+        resumeVideoAfterHoverIfNeeded();
     }
 
     function positionExplainDialogNearSelection(dialog, selection) {
@@ -372,7 +537,7 @@
 
             const anchorNode = selection.anchorNode;
             const anchorElement = anchorNode?.nodeType === 1 ? anchorNode : anchorNode?.parentElement;
-            const inTranscript = !!anchorElement?.closest?.('ytd-transcript-renderer, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"], ytd-transcript-segment-renderer');
+            const inTranscript = !!anchorElement?.closest?.('#yt-current-line-window, ytd-transcript-renderer, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"], ytd-transcript-segment-renderer');
             if (!inTranscript) return;
 
             await showWordByWordExplanation(text, selection);
@@ -380,6 +545,17 @@
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') closeExplainDialog();
+        });
+
+        document.addEventListener('pointerdown', (e) => {
+            if (!explainDialog || explainDialog.style.display === 'none') return;
+            if (explainDialog.contains(e.target)) return;
+
+            const underVideo = e.target?.closest?.('#below, #meta, #primary-inner, #yt-current-line-window');
+            if (!underVideo) return;
+
+            // Single-click close on under-video empty area.
+            closeExplainDialog();
         });
     }
 
@@ -426,13 +602,30 @@
                 try {
                     const data = JSON.parse(text);
                     if (data.events) {
-                        const lines = data.events
-                            .filter(event => event.segs)
-                            .map(event => event.segs.map(s => s.utf8).join('').replace(/\n/g, ' '))
-                            .filter(line => line.trim() !== '');
+                        const cues = data.events
+                            .filter(event => event && Array.isArray(event.segs) && event.segs.length)
+                            .map(event => {
+                                const text = event.segs.map(s => s?.utf8 || '').join('').replace(/\n/g, ' ').trim();
+                                const startMs = Number(event.tStartMs);
+                                const durationMs = Number(event.dDurationMs);
+                                const safeStart = Number.isFinite(startMs) ? startMs : 0;
+                                const safeDur = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 2500;
+                                const endMs = safeStart + safeDur;
+                                return { text, startMs: safeStart, endMs };
+                            })
+                            .filter(c => c.text);
+
+                        const lines = cues.map(c => c.text);
+                        currentCues = cues;
+                        bindVideoTimeSync();
 
                         if (lines.length > 0) {
                             displaySubtitles(lines);
+                            if (currentCues.length > 0) {
+                                handleVideoTimeUpdate();
+                            } else {
+                                setFloatingLineText(lines[0]);
+                            }
                             return;
                         }
                     }
@@ -447,21 +640,36 @@
             const xmlText = await xmlResponse.text();
 
             // Manual Regex parsing to avoid Trusted Types DOMParser issues
-            const regex = /<text\s+[^>]*>([\s\S]*?)<\/text>/g;
+            const regex = /<text\s+([^>]*)>([\s\S]*?)<\/text>/g;
             const lines = [];
+            const cues = [];
             let match;
             while ((match = regex.exec(xmlText)) !== null) {
-                lines.push(decodeEntities(match[1]));
+                const attrs = match[1] || '';
+                const raw = decodeEntities(match[2] || '').trim();
+                if (!raw) continue;
+                lines.push(raw);
+
+                const s = attrs.match(/\sstart="([0-9.]+)"/);
+                const d = attrs.match(/\sdur="([0-9.]+)"/);
+                const startMs = s ? Math.floor(parseFloat(s[1]) * 1000) : 0;
+                const endMs = startMs + (d ? Math.floor(parseFloat(d[1]) * 1000) : 2500);
+                cues.push({ text: raw, startMs, endMs });
             }
 
             if (lines.length > 0) {
+                currentCues = cues;
+                bindVideoTimeSync();
                 displaySubtitles(lines);
+                handleVideoTimeUpdate();
                 return;
             }
 
             // Final fallback: scrape transcript panel from DOM
             const domLines = await extractFromTranscriptPanel();
             if (domLines.length > 0) {
+                currentCues = [];
+                setFloatingLineText(domLines[0] || '');
                 displaySubtitles(domLines);
             } else {
                 subtitleContent.innerText = 'No subtitles available for this track.';
@@ -507,6 +715,21 @@
     });
 
     function init() {
+        ensureFloatingLineWindow();
+        bindVideoTimeSync();
+
+        // YouTube DOM can render late; retry mounting below video a few times.
+        let mountRetries = 0;
+        const mountTimer = setInterval(() => {
+            ensureFloatingLineWindow();
+            bindVideoTimeSync();
+            handleVideoTimeUpdate();
+            mountRetries += 1;
+            if ((floatingLineWindow && floatingLineWindow.isConnected && floatingLineWindow.closest('#below, #meta, #primary-inner')) || mountRetries >= 20) {
+                clearInterval(mountTimer);
+            }
+        }, 500);
+
         const script = document.createElement('script');
         script.src = chrome.runtime.getURL('inject.js');
         (document.head || document.documentElement).appendChild(script);
@@ -517,6 +740,8 @@
     initSelectionExplain();
 
     window.addEventListener('yt-navigate-finish', () => {
+        currentCues = [];
+        setFloatingLineText('');
         if (subtitleWindow) {
             subtitleContent.innerText = 'Loading...';
         }
