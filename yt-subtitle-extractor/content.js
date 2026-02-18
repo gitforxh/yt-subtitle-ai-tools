@@ -7,6 +7,8 @@
     let activeVideo = null;
     let floatingLineWindow = null;
     let floatingLineText = null;
+    let floatingTrackSelect = null;
+    let floatingTrackRow = null;
     let lastFloatingLine = '—';
     let hoverPausedVideo = null;
     let hoverWasPlayingBeforePause = false;
@@ -14,6 +16,7 @@
     let selectedTokenEl = null;
     let selectedTokenEls = [];
     let keepSelectedTokenUntil = 0;
+    let isNormalizingTokenSelection = false;
     let lastRenderedFloatingLine = '';
 
     function createUI() {
@@ -104,8 +107,41 @@
         };
     }
 
+    function refreshFloatingTrackOptions(tracks) {
+        if (!floatingTrackSelect) return;
+        floatingTrackSelect.innerHTML = '';
+
+        if (!Array.isArray(tracks) || !tracks.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No subtitle tracks';
+            floatingTrackSelect.appendChild(opt);
+            floatingTrackSelect.disabled = true;
+            return;
+        }
+
+        floatingTrackSelect.disabled = false;
+        tracks.forEach(track => {
+            const name = track.name?.simpleText || track.languageCode || 'Track';
+            const label = `${name}${track.kind === 'asr' ? ' (auto)' : ''}`;
+
+            const opt = document.createElement('option');
+            opt.value = track.baseUrl;
+            opt.textContent = label;
+            floatingTrackSelect.appendChild(opt);
+
+            if (track.languageCode !== 'en') {
+                const tr = document.createElement('option');
+                tr.value = track.baseUrl + '&tlang=en';
+                tr.textContent = `${label} → English`;
+                floatingTrackSelect.appendChild(tr);
+            }
+        });
+    }
+
     function updateTrackList(tracks) {
         currentTracks = tracks;
+        refreshFloatingTrackOptions(tracks);
         trackList.innerHTML = '';
 
         const label = document.createElement('div');
@@ -182,6 +218,30 @@
             floatingLineWindow.style.display = 'block';
             floatingLineWindow.style.textAlign = 'center';
 
+            const trackRow = document.createElement('div');
+            floatingTrackRow = trackRow;
+            trackRow.id = 'yt-current-line-track-row';
+            trackRow.style.marginBottom = '8px';
+            trackRow.style.display = 'none';
+            trackRow.style.justifyContent = 'center';
+
+            floatingTrackSelect = document.createElement('select');
+            floatingTrackSelect.id = 'yt-current-line-track-select';
+            floatingTrackSelect.style.maxWidth = '420px';
+            floatingTrackSelect.style.width = '100%';
+            floatingTrackSelect.style.fontSize = '13px';
+            floatingTrackSelect.style.padding = '6px 8px';
+            floatingTrackSelect.style.borderRadius = '8px';
+            floatingTrackSelect.style.border = '1px solid rgba(120,180,255,0.45)';
+            floatingTrackSelect.style.background = 'rgba(20,30,60,0.55)';
+            floatingTrackSelect.style.color = 'inherit';
+            floatingTrackSelect.disabled = true;
+            floatingTrackSelect.addEventListener('change', () => {
+                const baseUrl = (floatingTrackSelect.value || '').trim();
+                if (baseUrl) fetchSubtitles(baseUrl);
+            });
+            trackRow.appendChild(floatingTrackSelect);
+
             floatingLineText = document.createElement('div');
             floatingLineText.id = 'yt-current-line-text';
             floatingLineText.textContent = '—';
@@ -217,6 +277,7 @@
                 await showWordByWordExplanation(word, null, token);
             });
 
+            floatingLineWindow.appendChild(trackRow);
             floatingLineWindow.appendChild(floatingLineText);
 
             floatingLineWindow.addEventListener('mouseenter', () => {
@@ -249,6 +310,22 @@
             if (mount) {
                 mount.prepend(floatingLineWindow);
             }
+        }
+
+        // Keep exactly one track row instance and keep it in floating window only.
+        const dupRows = [...document.querySelectorAll('#yt-current-line-track-row')];
+        if (dupRows.length > 1 && floatingTrackRow) {
+            dupRows.forEach((el) => { if (el !== floatingTrackRow) el.remove(); });
+        }
+
+        if (floatingTrackRow && floatingTrackRow.parentElement !== floatingLineWindow) {
+            floatingTrackRow.style.position = '';
+            floatingTrackRow.style.left = '';
+            floatingTrackRow.style.top = '';
+            floatingTrackRow.style.width = '';
+            floatingTrackRow.style.margin = '0 0 8px 0';
+            floatingTrackRow.style.zIndex = '';
+            floatingLineWindow.prepend(floatingTrackRow);
         }
 
         return floatingLineWindow;
@@ -318,18 +395,44 @@
         }
     }
 
-    function setSelectedTokensFromSelection(selection) {
-        clearSelectedTokens();
-        if (!selection || !selection.rangeCount) return;
+    function normalizeSelectionToPickedTokens(selection, picked) {
+        if (!selection || !picked || !picked.length) return;
+        const first = picked[0];
+        const last = picked[picked.length - 1];
+        if (!first || !last) return;
+
+        try {
+            isNormalizingTokenSelection = true;
+            const r = document.createRange();
+            // Use element boundaries so the whole token is always included.
+            r.setStartBefore(first);
+            r.setEndAfter(last);
+            selection.removeAllRanges();
+            selection.addRange(r);
+        } catch (_) {
+            // ignore
+        } finally {
+            setTimeout(() => { isNormalizingTokenSelection = false; }, 0);
+        }
+    }
+
+    function getPickedTokensFromSelection(selection) {
+        if (!selection || !selection.rangeCount || !floatingLineText) return [];
         const range = selection.getRangeAt(0);
         const tokens = [...floatingLineText.querySelectorAll('[data-token="1"]')];
-        const picked = tokens.filter(tok => {
+        return tokens.filter(tok => {
             try { return range.intersectsNode(tok); } catch { return false; }
         });
+    }
+
+    function setSelectedTokensFromSelection(selection) {
+        clearSelectedTokens();
+        const picked = getPickedTokensFromSelection(selection);
         if (!picked.length) return;
         selectedTokenEls = picked;
         selectedTokenEl = picked[0];
         picked.forEach(tok => paintToken(tok, 'selected'));
+        normalizeSelectionToPickedTokens(selection, picked);
     }
 
     function updateSelectedTokensFromCurrentSelection() {
@@ -713,7 +816,7 @@
             }
 
             const selection = window.getSelection();
-            const text = (selection?.toString() || '').trim();
+            let text = (selection?.toString() || '').trim();
             if (!text) return;
 
             const anchorNode = selection.anchorNode;
@@ -721,7 +824,19 @@
             const inTranscript = !!anchorElement?.closest?.('#yt-current-line-window, ytd-transcript-renderer, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"], ytd-transcript-segment-renderer');
             if (!inTranscript) return;
 
-            await showWordByWordExplanation(text, selection, anchorElement);
+            const inFloating = !!anchorElement?.closest?.('#yt-current-line-text');
+            let anchorForPopup = anchorElement;
+            if (inFloating) {
+                const picked = getPickedTokensFromSelection(selection);
+                if (picked.length) {
+                    // Force full-token selection and use full-token text for explain.
+                    setSelectedTokensFromSelection(selection);
+                    text = picked.map(t => (t.textContent || '').trim()).filter(Boolean).join(' ');
+                    anchorForPopup = picked[picked.length - 1] || anchorElement;
+                }
+            }
+
+            await showWordByWordExplanation(text, selection, anchorForPopup);
         });
 
         document.addEventListener('keydown', (e) => {
@@ -729,6 +844,7 @@
         });
 
         document.addEventListener('selectionchange', () => {
+            if (isNormalizingTokenSelection) return;
             updateSelectedTokensFromCurrentSelection();
         });
 
@@ -887,6 +1003,7 @@
             const tracks = event.data.captionTracks || [];
             const defaultTrack = tracks.find(t => t.languageCode === 'en') || tracks[0];
             if (defaultTrack) {
+                if (floatingTrackSelect) floatingTrackSelect.value = defaultTrack.baseUrl;
                 fetchSubtitles(defaultTrack.baseUrl);
             } else {
                 subtitleContent.innerText = 'No tracks found.';
