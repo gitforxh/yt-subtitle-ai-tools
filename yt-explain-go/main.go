@@ -169,7 +169,7 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 		lang = "en"
 	}
 	prompt := fmt.Sprintf(
-		"Explain ONLY the selected text between <text> tags. Provide both word-by-word breakdown and grammar notes. Ignore any other metadata. IMPORTANT: Write meaning/explanation/example in user's language (%s). Return JSON only with shape: {\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}\n\n<text>%s</text>",
+		"Task: Explain ONLY the selected text between <text> tags. Treat this as a standalone request and do not rely on any previous conversation context. Provide both word-by-word breakdown and grammar notes. IMPORTANT: Write meaning/explanation/example in user's language (%s). Return JSON only with shape: {\"items\":[{\"word\":\"...\",\"reading\":\"...\",\"partOfSpeech\":\"...\",\"meaning\":\"...\"}],\"grammar\":[{\"pattern\":\"...\",\"explanation\":\"...\",\"example\":\"...\"}]}\n\n<text>%s</text>",
 		lang,
 		selectedText,
 	)
@@ -190,7 +190,7 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 		var hist OpenClawHistoryResp
 		err := runOpenClaw(ctx, openclawBin, "chat.history", map[string]any{
 			"sessionKey": sessionKey,
-			"limit":      20,
+			"limit":      8,
 		}, &hist)
 		if err != nil {
 			continue
@@ -346,21 +346,20 @@ func main() {
 		if sessionKey == "" {
 			sessionKey = cfg.SessionKey
 		}
-		// No context mode: use an ephemeral session key per request for faster responses.
-		ephemeralSessionKey := fmt.Sprintf("%s-%d", sessionKey, time.Now().UnixNano())
+		// Fixed single session key mode: prevent session explosion.
 		requestID := strings.TrimSpace(in.RequestID)
 		if requestID == "" {
 			requestID = fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
-		tracker.set(requestID, inflightRequest{cancel: cancel, sessionKey: ephemeralSessionKey})
+		tracker.set(requestID, inflightRequest{cancel: cancel, sessionKey: sessionKey})
 		defer func() {
 			tracker.del(requestID)
 			cancel()
 		}()
 
-		items, err := explainViaOpenClaw(ctx, cfg.OpenClawBin, in.Text, ephemeralSessionKey, in.UserLanguage, requestID)
+		items, err := explainViaOpenClaw(ctx, cfg.OpenClawBin, in.Text, sessionKey, in.UserLanguage, requestID)
 		if err != nil {
 			if ctx.Err() == context.Canceled {
 				writeJSON(w, 499, map[string]any{"ok": false, "error": "request canceled"})
