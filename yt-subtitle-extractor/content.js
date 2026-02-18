@@ -603,9 +603,12 @@
             throw new Error(res?.error || 'Dictionary lookup failed.');
         }
 
-        const items = Array.isArray(res.items) ? res.items : [];
-        explainCache.set(cacheKey, items);
-        return items;
+        const data = {
+            items: Array.isArray(res.items) ? res.items : [],
+            groups: Array.isArray(res.groups) ? res.groups : []
+        };
+        explainCache.set(cacheKey, data);
+        return data;
     }
 
     function ensureExplainDialog() {
@@ -750,6 +753,20 @@
         }).join('');
     }
 
+    function renderDictionaryGroups(groups) {
+        if (!Array.isArray(groups) || !groups.length) return 'No results.';
+        return groups.map((g) => {
+            const token = String(g.token || '').replace(/</g, '&lt;');
+            const body = (Array.isArray(g.items) && g.items.length)
+                ? renderExplainItems(g.items)
+                : `<div style="opacity:.8;">${String(g.error || 'No result').replace(/</g, '&lt;')}</div>`;
+            return `<div style="margin-bottom:10px;padding:8px;border:1px solid rgba(196,140,255,0.35);border-radius:8px;background:rgba(255,255,255,0.03);">
+                <div style="font-weight:700;margin-bottom:6px;">Token: ${token}</div>
+                ${body}
+            </div>`;
+        }).join('');
+    }
+
     async function showWordByWordExplanation(text, selection, anchorEl) {
         if (!text || !text.trim()) return;
 
@@ -790,8 +807,12 @@
         const list = dialog.querySelector('#yt-explain-list');
 
         try {
-            const dictItems = await fetchDictionaryFirst(text);
-            dictList.innerHTML = renderExplainItems(dictItems);
+            const dictData = await fetchDictionaryFirst(text);
+            if (Array.isArray(dictData.groups) && dictData.groups.length) {
+                dictList.innerHTML = renderDictionaryGroups(dictData.groups);
+            } else {
+                dictList.innerHTML = renderExplainItems(dictData.items || []);
+            }
         } catch (err) {
             dictList.innerHTML = `Dictionary error: ${(err?.message || 'Failed').replace(/</g, '&lt;')}`;
         }

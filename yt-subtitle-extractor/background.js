@@ -81,30 +81,44 @@ function hasJapanese(text) {
   return /[\u3040-\u30ff\u3400-\u9fff]/.test(text || '');
 }
 
-async function callDictionary(text) {
-  const q = String(text || '').trim();
-  if (!q) return [];
-
-  if (hasJapanese(q)) {
-    const url = `https://jisho.org/api/v1/search/words?keyword=${encodeURIComponent(q)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
-    const data = await res.json();
-    const rows = Array.isArray(data?.data) ? data.data : [];
-    return rows.slice(0, 5).map((r) => {
-      const japanese = Array.isArray(r?.japanese) ? r.japanese[0] : null;
-      const senses = Array.isArray(r?.senses) ? r.senses[0] : null;
-      return {
-        word: japanese?.word || japanese?.reading || q,
-        reading: japanese?.reading || '',
-        partOfSpeech: Array.isArray(senses?.parts_of_speech) ? senses.parts_of_speech.join(', ') : '',
-        meaning: Array.isArray(senses?.english_definitions) ? senses.english_definitions.slice(0, 4).join('; ') : ''
-      };
-    }).filter(x => x.meaning || x.word);
+function tokenizeQuery(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  const parts = raw
+    .split(/[\s\n\t,.;:!?()\[\]{}"“”]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const deduped = [];
+  const seen = new Set();
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(p);
   }
+  return deduped.slice(0, 8);
+}
 
-  const oneWord = q.split(/\s+/)[0];
-  const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(oneWord)}`;
+async function lookupJapanese(token) {
+  const url = `https://jisho.org/api/v1/search/words?keyword=${encodeURIComponent(token)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
+  const data = await res.json();
+  const rows = Array.isArray(data?.data) ? data.data : [];
+  return rows.slice(0, 4).map((r) => {
+    const japanese = Array.isArray(r?.japanese) ? r.japanese[0] : null;
+    const senses = Array.isArray(r?.senses) ? r.senses[0] : null;
+    return {
+      word: japanese?.word || japanese?.reading || token,
+      reading: japanese?.reading || '',
+      partOfSpeech: Array.isArray(senses?.parts_of_speech) ? senses.parts_of_speech.join(', ') : '',
+      meaning: Array.isArray(senses?.english_definitions) ? senses.english_definitions.slice(0, 4).join('; ') : ''
+    };
+  }).filter(x => x.meaning || x.word);
+}
+
+async function lookupEnglish(token) {
+  const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(token)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Dictionary failed: ${res.status}`);
   const data = await res.json();
@@ -112,13 +126,32 @@ async function callDictionary(text) {
   const meaning = Array.isArray(entry?.meanings) ? entry.meanings[0] : null;
   const def = Array.isArray(meaning?.definitions) ? meaning.definitions[0] : null;
   if (!entry) return [];
-  const item = {
-    word: entry.word || oneWord,
+  return [{
+    word: entry.word || token,
     reading: entry.phonetic || '',
     partOfSpeech: meaning?.partOfSpeech || '',
     meaning: def?.definition || ''
-  };
-  return [item].filter(x => x.meaning || x.word);
+  }].filter(x => x.meaning || x.word);
+}
+
+async function callDictionary(text) {
+  const q = String(text || '').trim();
+  if (!q) return { items: [], groups: [] };
+
+  const tokens = tokenizeQuery(q);
+  const useTokens = tokens.length > 1 ? tokens : [q];
+
+  const groups = await Promise.all(useTokens.map(async (token) => {
+    try {
+      const items = hasJapanese(token) ? await lookupJapanese(token) : await lookupEnglish(token);
+      return { token, items };
+    } catch (err) {
+      return { token, items: [], error: err?.message || 'Lookup failed' };
+    }
+  }));
+
+  const items = groups.flatMap(g => g.items || []);
+  return { items, groups };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -135,8 +168,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       if (msg?.type === 'dict:lookup') {
-        const items = await callDictionary(msg.text || '');
-        sendResponse({ ok: true, items });
+        const data = await callDictionary(msg.text || '');
+        sendResponse({ ok: true, items: data.items || [], groups: data.groups || [] });
         return;
       }
       if (msg?.type === 'ai:explain') {
