@@ -61,7 +61,7 @@ function readForm() {
     openaiApiKey: document.getElementById('openaiApiKey').value.trim(),
     openaiModel: getSelectedModel({ selectId: 'openaiModel', customInputId: 'openaiModelCustom', fallbackModel: 'gpt-4o-mini' }),
     geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
-    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-2.5-flash' })
+    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-3-flash' })
   };
 }
 
@@ -83,11 +83,11 @@ async function load() {
   });
   document.getElementById('geminiApiKey').value = c.geminiApiKey || '';
   applyModelToForm({
-    model: c.geminiModel || 'gemini-2.5-flash',
+    model: c.geminiModel || 'gemini-3-flash',
     selectId: 'geminiModel',
     customInputId: 'geminiModelCustom',
     customRowId: 'geminiModelCustomRow',
-    fallbackModel: 'gemini-2.5-flash'
+    fallbackModel: 'gemini-3-flash'
   });
 
   toggleProviderSections(document.getElementById('aiProvider').value);

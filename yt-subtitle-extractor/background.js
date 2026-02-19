@@ -119,7 +119,7 @@ async function callExplainViaGemini(cfg, text, rid, controller) {
   const apiKey = String(cfg?.geminiApiKey || '').trim();
   if (!apiKey) throw new Error('Missing Gemini API key in settings');
 
-  const model = String(cfg?.geminiModel || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+  const model = String(cfg?.geminiModel || 'gemini-3-flash').trim() || 'gemini-3-flash';
   const userLanguage = String(cfg?.userLanguage || 'en').trim() || 'en';
   inflightExplainRequests.set(rid, { controller, provider: 'gemini' });
 
@@ -225,7 +225,7 @@ async function testBridge(config) {
   if (provider === 'gemini') {
     const apiKey = String(config?.geminiApiKey || '').trim();
     if (!apiKey) throw new Error('Missing Gemini API key');
-    const model = String(config?.geminiModel || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+    const model = String(config?.geminiModel || 'gemini-3-flash').trim() || 'gemini-3-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}?key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Gemini auth/model failed: ${res.status}`);
