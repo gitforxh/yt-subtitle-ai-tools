@@ -231,7 +231,7 @@ function readForm() {
     .filter((v) => v && v !== '__custom__');
 
   return {
-    aiProvider: document.getElementById('aiProvider').value || 'openclaw',
+    aiProvider: document.getElementById('aiProvider').value || 'gemini',
     helperUrl: document.getElementById('helperUrl').value.trim() || 'http://127.0.0.1:18794',
     sessionKey: document.getElementById('sessionKey').value.trim() || 'ext-transcript',
     userLanguage: document.getElementById('userLanguage').value.trim() || 'en',
@@ -248,7 +248,7 @@ async function load() {
   const data = await getStorage(['bridgeConfig']);
   const c = data.bridgeConfig || {};
 
-  document.getElementById('aiProvider').value = c.aiProvider || 'openclaw';
+  document.getElementById('aiProvider').value = c.aiProvider || 'gemini';
   document.getElementById('helperUrl').value = c.helperUrl || 'http://127.0.0.1:18794';
   document.getElementById('sessionKey').value = c.sessionKey || 'ext-transcript';
   document.getElementById('userLanguage').value = c.userLanguage || 'en';

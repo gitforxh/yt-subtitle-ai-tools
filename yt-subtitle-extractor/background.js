@@ -199,7 +199,7 @@ Return JSON shape exactly:
 
 async function callExplain(text, requestId) {
   const cfg = await getBridgeConfig();
-  const provider = (cfg?.aiProvider || 'openclaw').toLowerCase();
+  const provider = (cfg?.aiProvider || 'gemini').toLowerCase();
   const rid = String(requestId || `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const controller = new AbortController();
 
@@ -244,7 +244,7 @@ async function cancelExplain(requestId) {
 }
 
 async function testBridge(config) {
-  const provider = (config?.aiProvider || 'openclaw').toLowerCase();
+  const provider = (config?.aiProvider || 'gemini').toLowerCase();
 
   if (provider === 'openai') {
     const apiKey = String(config?.openaiApiKey || '').trim();
@@ -438,7 +438,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg?.type === 'bridge:status') {
         const data = await getStorage(['bridgeConnected', 'bridgeConfig']);
         const config = data.bridgeConfig || {};
-        const provider = (config.aiProvider || 'openclaw').toLowerCase();
+        const provider = (config.aiProvider || 'gemini').toLowerCase();
 
         if (provider === 'openai') {
           const connected = !!String(config.openaiApiKey || '').trim();
