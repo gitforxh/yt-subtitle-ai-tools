@@ -580,6 +580,18 @@
     let activeAIRequestId = '';
     let activeAIRequestInFlight = false;
 
+    async function getAIProviderName() {
+        try {
+            const r = await chrome.runtime.sendMessage({ type: 'bridge:status' });
+            const provider = String(r?.config?.aiProvider || 'openclaw').toLowerCase();
+            if (provider === 'gemini') return 'Gemini';
+            if (provider === 'openai') return 'OpenAI';
+            return 'OpenClaw';
+        } catch (_) {
+            return 'AI';
+        }
+    }
+
     async function fetchAIWordByWordExplanation(text, requestId) {
         const cacheKey = `ai:${text.trim()}`;
         if (explainCache.has(cacheKey)) return explainCache.get(cacheKey);
@@ -873,6 +885,11 @@
         const aiBtn = dialog.querySelector('#yt-ai-btn');
         const aiStatus = dialog.querySelector('#yt-ai-status');
         const list = dialog.querySelector('#yt-explain-list');
+
+        if (aiBtn) {
+            const providerName = await getAIProviderName();
+            aiBtn.textContent = `Get explanation by ${providerName}`;
+        }
 
         try {
             const dictData = await fetchDictionaryFirst(text);
