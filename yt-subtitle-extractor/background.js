@@ -77,7 +77,20 @@ async function callExplainViaOpenAI(cfg, text, rid, controller) {
   const userLanguage = String(cfg?.userLanguage || 'en').trim() || 'en';
   inflightExplainRequests.set(rid, { controller, provider: 'openai' });
 
-  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context. Write meaning/explanation/example in user language (${userLanguage}). Return JSON only with shape: {"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}\n\n<text>${text}</text>`;
+  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context.
+
+Requirements:
+1) Do word-by-word explanation for the full sentence/phrase.
+2) In "items", include each important word/token in order as it appears.
+3) For each item, provide: word, reading (if relevant), partOfSpeech, and concise meaning in user language (${userLanguage}).
+4) In "grammar", explain sentence-level grammar/patterns (particles, conjugations, tense/aspect, clause structure, nuance).
+5) If text is short, still provide at least one grammar entry summarizing the sentence structure.
+6) Return strict JSON only (no markdown, no extra text).
+
+Return JSON shape exactly:
+{"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}
+
+<text>${text}</text>`;
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -123,7 +136,20 @@ async function callExplainViaGemini(cfg, text, rid, controller) {
   const userLanguage = String(cfg?.userLanguage || 'en').trim() || 'en';
   inflightExplainRequests.set(rid, { controller, provider: 'gemini' });
 
-  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context. Write meaning/explanation/example in user language (${userLanguage}). Return JSON only with shape: {"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}\n\n<text>${text}</text>`;
+  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context.
+
+Requirements:
+1) Do word-by-word explanation for the full sentence/phrase.
+2) In "items", include each important word/token in order as it appears.
+3) For each item, provide: word, reading (if relevant), partOfSpeech, and concise meaning in user language (${userLanguage}).
+4) In "grammar", explain sentence-level grammar/patterns (particles, conjugations, tense/aspect, clause structure, nuance).
+5) If text is short, still provide at least one grammar entry summarizing the sentence structure.
+6) Return strict JSON only (no markdown, no extra text).
+
+Return JSON shape exactly:
+{"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}
+
+<text>${text}</text>`;
 
   async function generateWithModel(targetModel) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
