@@ -52,7 +52,106 @@ function getSelectedModel({ selectId, customInputId, fallbackModel }) {
   return selectValue || fallbackModel;
 }
 
+function normalizeGeminiModelName(name) {
+  return String(name || '').replace(/^models\//, '').trim();
+}
+
+function isLikelyNewerGemini(a, b) {
+  const pa = normalizeGeminiModelName(a).match(/^gemini-(\d+(?:\.\d+)?)(?:-(.*))?$/i);
+  const pb = normalizeGeminiModelName(b).match(/^gemini-(\d+(?:\.\d+)?)(?:-(.*))?$/i);
+  if (!pa || !pb) return normalizeGeminiModelName(a).localeCompare(normalizeGeminiModelName(b));
+
+  const va = Number(pa[1]);
+  const vb = Number(pb[1]);
+  if (va !== vb) return vb - va;
+
+  const ra = (pa[2] || '').toLowerCase();
+  const rb = (pb[2] || '').toLowerCase();
+  const rank = (s) => {
+    if (s.includes('pro')) return 0;
+    if (s.includes('flash') && s.includes('lite')) return 2;
+    if (s.includes('flash')) return 1;
+    return 3;
+  };
+  const diff = rank(ra) - rank(rb);
+  if (diff) return diff;
+  return normalizeGeminiModelName(a).localeCompare(normalizeGeminiModelName(b));
+}
+
+function setGeminiModelOptions(modelIds, preferredModel) {
+  const select = document.getElementById('geminiModel');
+  const models = Array.from(new Set((modelIds || []).map(normalizeGeminiModelName).filter(Boolean))).sort(isLikelyNewerGemini);
+
+  const current = String(preferredModel || getSelectedModel({
+    selectId: 'geminiModel',
+    customInputId: 'geminiModelCustom',
+    fallbackModel: 'gemini-3-flash'
+  }) || '').trim();
+
+  select.innerHTML = '';
+  for (const m of models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    select.appendChild(opt);
+  }
+  const custom = document.createElement('option');
+  custom.value = '__custom__';
+  custom.textContent = 'Custom…';
+  select.appendChild(custom);
+
+  applyModelToForm({
+    model: current,
+    selectId: 'geminiModel',
+    customInputId: 'geminiModelCustom',
+    customRowId: 'geminiModelCustomRow',
+    fallbackModel: models[0] || 'gemini-3-flash'
+  });
+}
+
+async function refreshGeminiModels() {
+  const apiKey = document.getElementById('geminiApiKey').value.trim();
+  if (!apiKey) {
+    setStatus('Enter Gemini API key first, then refresh models.', true);
+    return;
+  }
+
+  const btn = document.getElementById('refreshGeminiModelsBtn');
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = 'Refreshing...';
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    const raw = await res.text();
+    if (!res.ok) throw new Error(`ListModels failed: ${res.status} ${raw.slice(0, 180)}`);
+
+    const obj = JSON.parse(raw);
+    const models = Array.isArray(obj?.models) ? obj.models : [];
+    const ids = models
+      .filter((m) => Array.isArray(m?.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+      .map((m) => m?.name)
+      .filter(Boolean);
+
+    if (!ids.length) throw new Error('No generateContent models returned by Google for this key/project.');
+
+    setGeminiModelOptions(ids);
+    await setStorage({ bridgeConfig: readForm() });
+    setStatus(`Gemini models refreshed (${ids.length} found)`);
+  } catch (err) {
+    setStatus(err?.message || 'Failed to refresh Gemini models', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function readForm() {
+  const geminiModelsList = Array.from(document.getElementById('geminiModel').options)
+    .map((o) => o.value)
+    .filter((v) => v && v !== '__custom__');
+
   return {
     aiProvider: document.getElementById('aiProvider').value || 'openclaw',
     helperUrl: document.getElementById('helperUrl').value.trim() || 'http://127.0.0.1:18794',
@@ -61,7 +160,8 @@ function readForm() {
     openaiApiKey: document.getElementById('openaiApiKey').value.trim(),
     openaiModel: getSelectedModel({ selectId: 'openaiModel', customInputId: 'openaiModelCustom', fallbackModel: 'gpt-4o-mini' }),
     geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
-    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-3-flash' })
+    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-3-flash' }),
+    geminiModelsList
   };
 }
 
@@ -89,6 +189,9 @@ async function load() {
     customRowId: 'geminiModelCustomRow',
     fallbackModel: 'gemini-3-flash'
   });
+  if (Array.isArray(c.geminiModelsList) && c.geminiModelsList.length) {
+    setGeminiModelOptions(c.geminiModelsList, c.geminiModel || '');
+  }
 
   toggleProviderSections(document.getElementById('aiProvider').value);
 }
@@ -139,5 +242,6 @@ document.getElementById('geminiModel').addEventListener('change', (e) => {
 document.getElementById('saveBtn').addEventListener('click', save);
 document.getElementById('connectBtn').addEventListener('click', connect);
 document.getElementById('checkBtn').addEventListener('click', check);
+document.getElementById('refreshGeminiModelsBtn').addEventListener('click', refreshGeminiModels);
 
 load();

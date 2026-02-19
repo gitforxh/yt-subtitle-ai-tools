@@ -70,6 +70,8 @@
           <option value="gemini-1.5-flash">gemini-1.5-flash</option>
           <option value="__custom__">Custom…</option>
         </select>
+        <button id="refreshGeminiModelsBtn" style="margin-top:8px;">Refresh model list from Google</button>
+        <div class="muted">Fetches <code>v1beta/models</code> and keeps only models that support <code>generateContent</code>.</div>
       </div>
       <div class="row hidden" id="geminiModelCustomRow">
         <label>Custom Gemini Model ID</label>
