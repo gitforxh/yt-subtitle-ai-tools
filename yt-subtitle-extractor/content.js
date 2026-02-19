@@ -631,6 +631,61 @@
         return data;
     }
 
+    function tokenizeDictionaryQuery(text) {
+        const raw = String(text || '').trim();
+        if (!raw) return [];
+        const parts = raw
+            .split(/[\s\n\t,.;:!?()\[\]{}"“”]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        const out = [];
+        const seen = new Set();
+        for (const p of parts) {
+            const k = p.toLowerCase();
+            if (seen.has(k)) continue;
+            seen.add(k);
+            out.push(p);
+        }
+        return out;
+    }
+
+    async function fetchDictionaryProgressive(text, onUpdate) {
+        const tokens = tokenizeDictionaryQuery(text);
+        if (tokens.length <= 1) {
+            const data = await fetchDictionaryFirst(text);
+            onUpdate?.(data);
+            return data;
+        }
+
+        const groups = tokens.map((token) => ({ token, items: [], error: 'Looking up...' }));
+        onUpdate?.({ items: [], groups: [...groups] });
+
+        await Promise.all(tokens.map(async (token, idx) => {
+            try {
+                const res = await chrome.runtime.sendMessage({ type: 'dict:lookup', text: token });
+                if (!res?.ok) {
+                    groups[idx] = { token, items: [], error: res?.error || 'Lookup failed' };
+                } else {
+                    const g = Array.isArray(res.groups) && res.groups.length
+                        ? res.groups[0]
+                        : { token, items: Array.isArray(res.items) ? res.items : [] };
+                    groups[idx] = {
+                        token,
+                        items: Array.isArray(g?.items) ? g.items : [],
+                        error: g?.error || ''
+                    };
+                }
+            } catch (err) {
+                groups[idx] = { token, items: [], error: err?.message || 'Lookup failed' };
+            }
+            onUpdate?.({ items: groups.flatMap(g => g.items || []), groups: [...groups] });
+        }));
+
+        const data = { items: groups.flatMap(g => g.items || []), groups };
+        explainCache.set(`dict:${text.trim()}`, data);
+        return data;
+    }
+
     function ensureExplainDialog() {
         if (explainDialog) return explainDialog;
 
@@ -900,13 +955,16 @@
         }
 
         try {
-            const dictData = await fetchDictionaryFirst(text);
-            if (Array.isArray(dictData.groups) && dictData.groups.length) {
-                dictList.innerHTML = renderDictionaryGroups(dictData.groups);
-                initDictionaryTabs(dictList);
-            } else {
-                dictList.innerHTML = renderExplainItems(dictData.items || []);
-            }
+            await fetchDictionaryProgressive(text, (dictData) => {
+                if (!explainDialog || explainDialog.style.display === 'none') return;
+                if (Array.isArray(dictData?.groups) && dictData.groups.length) {
+                    dictList.innerHTML = renderDictionaryGroups(dictData.groups);
+                    initDictionaryTabs(dictList);
+                } else {
+                    dictList.innerHTML = renderExplainItems(dictData?.items || []);
+                }
+                positionExplainDialogNearSelection(dialog, selection, anchorEl);
+            });
         } catch (err) {
             dictList.innerHTML = `Dictionary error: ${(err?.message || 'Failed').replace(/</g, '&lt;')}`;
         }
