@@ -160,7 +160,7 @@ function setGeminiModelOptions(modelIds, preferredModel) {
   const current = String(preferredModel || getSelectedModel({
     selectId: 'geminiModel',
     customInputId: 'geminiModelCustom',
-    fallbackModel: 'gemini-3-flash'
+    fallbackModel: 'gemini-2.5-flash'
   }) || '').trim();
 
   select.innerHTML = '';
@@ -180,7 +180,7 @@ function setGeminiModelOptions(modelIds, preferredModel) {
     selectId: 'geminiModel',
     customInputId: 'geminiModelCustom',
     customRowId: 'geminiModelCustomRow',
-    fallbackModel: models[0] || 'gemini-3-flash'
+    fallbackModel: models[0] || 'gemini-2.5-flash'
   });
 }
 
@@ -239,7 +239,7 @@ function readForm() {
     openaiModel: getSelectedModel({ selectId: 'openaiModel', customInputId: 'openaiModelCustom', fallbackModel: 'gpt-4o-mini' }),
     openaiModelsList,
     geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
-    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-3-flash' }),
+    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-2.5-flash' }),
     geminiModelsList
   };
 }
@@ -265,11 +265,11 @@ async function load() {
   }
   document.getElementById('geminiApiKey').value = c.geminiApiKey || '';
   applyModelToForm({
-    model: c.geminiModel || 'gemini-3-flash',
+    model: c.geminiModel || 'gemini-2.5-flash',
     selectId: 'geminiModel',
     customInputId: 'geminiModelCustom',
     customRowId: 'geminiModelCustomRow',
-    fallbackModel: 'gemini-3-flash'
+    fallbackModel: 'gemini-2.5-flash'
   });
   if (Array.isArray(c.geminiModelsList) && c.geminiModelsList.length) {
     setGeminiModelOptions(c.geminiModelsList, c.geminiModel || '');
