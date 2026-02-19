@@ -609,7 +609,7 @@
     function renderAIErrorMessage(msg) {
         const safe = String(msg || 'Failed').replace(/</g, '&lt;');
         if (/missing\s+.*api key.*settings/i.test(safe)) {
-            return `AI error: ${safe.replace(/settings/gi, '<a href="#" id="yt-open-settings-link">settings</a>')}`;
+            return `AI error: ${safe.replace(/settings/gi, '<a href="#" id="yt-open-settings-link" style="color:#fff; text-decoration:underline; text-underline-offset:2px; vertical-align:baseline;">settings</a>')}`;
         }
         return `AI error: ${safe}`;
     }
