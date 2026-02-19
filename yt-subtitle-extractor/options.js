@@ -13,16 +13,41 @@ function toggleProviderSections(provider) {
   document.getElementById('openaiSection').classList.toggle('hidden', !isOpenAI);
 }
 
-function ensureOpenAIModelOption(model) {
-  const select = document.getElementById('openaiModel');
-  if (!model) return;
-  const exists = Array.from(select.options).some((opt) => opt.value === model);
-  if (exists) return;
+function setCustomModelVisibility(visible) {
+  document.getElementById('openaiModelCustomRow').classList.toggle('hidden', !visible);
+}
 
-  const custom = document.createElement('option');
-  custom.value = model;
-  custom.textContent = `${model} (custom)`;
-  select.appendChild(custom);
+function applyOpenAIModelToForm(model) {
+  const select = document.getElementById('openaiModel');
+  const customInput = document.getElementById('openaiModelCustom');
+  const value = (model || '').trim();
+
+  if (!value) {
+    select.value = 'gpt-4o-mini';
+    customInput.value = '';
+    setCustomModelVisibility(false);
+    return;
+  }
+
+  const preset = Array.from(select.options).find((opt) => opt.value === value && opt.value !== '__custom__');
+  if (preset) {
+    select.value = value;
+    customInput.value = '';
+    setCustomModelVisibility(false);
+    return;
+  }
+
+  select.value = '__custom__';
+  customInput.value = value;
+  setCustomModelVisibility(true);
+}
+
+function getSelectedOpenAIModel() {
+  const selectValue = document.getElementById('openaiModel').value;
+  if (selectValue === '__custom__') {
+    return document.getElementById('openaiModelCustom').value.trim() || 'gpt-4o-mini';
+  }
+  return selectValue || 'gpt-4o-mini';
 }
 
 function readForm() {
@@ -32,7 +57,7 @@ function readForm() {
     sessionKey: document.getElementById('sessionKey').value.trim() || 'ext-transcript',
     userLanguage: document.getElementById('userLanguage').value.trim() || 'en',
     openaiApiKey: document.getElementById('openaiApiKey').value.trim(),
-    openaiModel: document.getElementById('openaiModel').value || 'gpt-4o-mini'
+    openaiModel: getSelectedOpenAIModel()
   };
 }
 
@@ -45,8 +70,7 @@ async function load() {
   document.getElementById('sessionKey').value = c.sessionKey || 'ext-transcript';
   document.getElementById('userLanguage').value = c.userLanguage || 'en';
   document.getElementById('openaiApiKey').value = c.openaiApiKey || '';
-  ensureOpenAIModelOption(c.openaiModel);
-  document.getElementById('openaiModel').value = c.openaiModel || 'gpt-4o-mini';
+  applyOpenAIModelToForm(c.openaiModel || 'gpt-4o-mini');
 
   toggleProviderSections(document.getElementById('aiProvider').value);
 }
@@ -76,6 +100,13 @@ async function check() {
 
 document.getElementById('aiProvider').addEventListener('change', (e) => {
   toggleProviderSections(e.target.value);
+});
+document.getElementById('openaiModel').addEventListener('change', (e) => {
+  const isCustom = e.target.value === '__custom__';
+  setCustomModelVisibility(isCustom);
+  if (!isCustom) {
+    document.getElementById('openaiModelCustom').value = '';
+  }
 });
 document.getElementById('saveBtn').addEventListener('click', save);
 document.getElementById('connectBtn').addEventListener('click', connect);
