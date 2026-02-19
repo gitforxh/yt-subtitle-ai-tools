@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Subtitle Learner",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "description": "Learn Youtube subtitles line by line with AI explanations",
   "permissions": [
     "scripting",
-    "storage",
-    "identity"
+    "storage"
   ],
   "host_permissions": [
     "https://*.youtube.com/*",
