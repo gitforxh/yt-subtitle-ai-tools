@@ -20,6 +20,7 @@ type Config struct {
 	BaseURL     string
 	SessionKey  string
 	OpenClawBin string
+	OpenClawDir string
 }
 
 type OpenClawMessage struct {
@@ -91,16 +92,19 @@ func loadConfig() Config {
 		BaseURL:     getenv("BASE_URL", "http://127.0.0.1:18794"),
 		SessionKey:  getenv("SESSION_KEY", "ext-transcript"),
 		OpenClawBin: getenv("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw"),
+		OpenClawDir: getenv("OPENCLAW_DIR", ""),
 	}
 }
 
-func runOpenClaw(ctx context.Context, openclawBin, method string, params map[string]any, out any) error {
+func runOpenClaw(ctx context.Context, openclawBin, openclawDir, method string, params map[string]any, out any) error {
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, openclawBin, "gateway", "call", method, "--params", string(paramsJSON))
-	cmd.Dir = "/Users/xhuang/work/openclaw/workspace"
+	if strings.TrimSpace(openclawDir) != "" {
+		cmd.Dir = openclawDir
+	}
 	cmd.Env = append(os.Environ(), "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -160,7 +164,7 @@ func textFromMessage(m OpenClawMessage) string {
 	}
 }
 
-func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionKey, userLanguage, requestID string) ([]any, error) {
+func explainViaOpenClaw(ctx context.Context, openclawBin, openclawDir, selectedText, sessionKey, userLanguage, requestID string) ([]any, error) {
 	if strings.TrimSpace(requestID) == "" {
 		requestID = fmt.Sprintf("RID-%d-%d", time.Now().UnixMilli(), time.Now().UnixNano()%1000000)
 	}
@@ -176,7 +180,7 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 	)
 
 	var sendResp map[string]any
-	err := runOpenClaw(ctx, openclawBin, "chat.send", map[string]any{
+	err := runOpenClaw(ctx, openclawBin, openclawDir, "chat.send", map[string]any{
 		"sessionKey":     sessionKey,
 		"message":        prompt,
 		"deliver":        false,
@@ -189,7 +193,7 @@ func explainViaOpenClaw(ctx context.Context, openclawBin, selectedText, sessionK
 	for i := 0; i < 12; i++ {
 		time.Sleep(1200 * time.Millisecond)
 		var hist OpenClawHistoryResp
-		err := runOpenClaw(ctx, openclawBin, "chat.history", map[string]any{
+		err := runOpenClaw(ctx, openclawBin, openclawDir, "chat.history", map[string]any{
 			"sessionKey": sessionKey,
 			"limit":      8,
 		}, &hist)
@@ -259,7 +263,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func abortOpenClawSession(openclawBin, sessionKey string) {
+func abortOpenClawSession(openclawBin, openclawDir, sessionKey string) {
 	sessionKey = strings.TrimSpace(sessionKey)
 	if sessionKey == "" {
 		return
@@ -267,7 +271,7 @@ func abortOpenClawSession(openclawBin, sessionKey string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var out map[string]any
-	_ = runOpenClaw(ctx, openclawBin, "chat.abort", map[string]any{"sessionKey": sessionKey}, &out)
+	_ = runOpenClaw(ctx, openclawBin, openclawDir, "chat.abort", map[string]any{"sessionKey": sessionKey}, &out)
 }
 
 func main() {
@@ -315,7 +319,7 @@ func main() {
 		req, ok := tracker.take(rid)
 		if ok {
 			req.cancel()
-			go abortOpenClawSession(cfg.OpenClawBin, req.sessionKey)
+			go abortOpenClawSession(cfg.OpenClawBin, cfg.OpenClawDir, req.sessionKey)
 		}
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -364,7 +368,7 @@ func main() {
 			cancel()
 		}()
 
-		items, err := explainViaOpenClaw(ctx, cfg.OpenClawBin, in.Text, sessionKey, in.UserLanguage, requestID)
+		items, err := explainViaOpenClaw(ctx, cfg.OpenClawBin, cfg.OpenClawDir, in.Text, sessionKey, in.UserLanguage, requestID)
 		if err != nil {
 			if ctx.Err() == context.Canceled {
 				writeJSON(w, 499, map[string]any{"ok": false, "error": "request canceled"})

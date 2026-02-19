@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="com.xhuang.yt-explain-go"
+LABEL="com.yt-explain-go"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-PROJECT_DIR="/Users/xhuang/work/workspace/yt-subtitle-ai-tools/yt-explain-go"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
 BIN="$PROJECT_DIR/yt-explain-go"
+WORK_DIR="${OPENCLAW_DIR:-$PWD}"
 GUI_DOMAIN="gui/$(id -u)"
 
 build_bin() {
@@ -15,19 +17,19 @@ build_bin() {
 
 install_plist() {
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-  cat > "$PLIST" <<'EOF'
+  cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.xhuang.yt-explain-go</string>
+    <string>${LABEL}</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/xhuang/work/workspace/yt-subtitle-ai-tools/yt-explain-go/yt-explain-go</string>
+      <string>${BIN}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/xhuang/work/openclaw/workspace</string>
+    <string>${WORK_DIR}</string>
     <key>EnvironmentVariables</key>
     <dict>
       <key>PORT</key>
@@ -38,6 +40,8 @@ install_plist() {
       <string>ext-transcript</string>
       <key>OPENCLAW_BIN</key>
       <string>/opt/homebrew/bin/openclaw</string>
+      <key>OPENCLAW_DIR</key>
+      <string>${WORK_DIR}</string>
       <key>PATH</key>
       <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
@@ -46,9 +50,9 @@ install_plist() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/xhuang/Library/Logs/yt-explain-go.log</string>
+    <string>${HOME}/Library/Logs/yt-explain-go.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/xhuang/Library/Logs/yt-explain-go.err.log</string>
+    <string>${HOME}/Library/Logs/yt-explain-go.err.log</string>
   </dict>
 </plist>
 EOF
