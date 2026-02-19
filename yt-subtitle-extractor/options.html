@@ -22,6 +22,7 @@
       <select id="aiProvider">
         <option value="openclaw">OpenClaw (Local Helper)</option>
         <option value="openai">OpenAI (Direct API)</option>
+        <option value="gemini">Google Gemini (Direct API)</option>
       </select>
     </div>
 
@@ -50,6 +51,26 @@
       <div class="row hidden" id="openaiModelCustomRow">
         <label>Custom OpenAI Model ID</label>
         <input id="openaiModelCustom" placeholder="e.g. gpt-5.2" />
+        <div class="muted">Use this if your model is not in the dropdown.</div>
+      </div>
+    </div>
+
+    <div id="geminiSection" class="hidden">
+      <p class="muted">Calls Google Gemini directly from extension background service worker.</p>
+      <div class="row"><label>Gemini API Key</label><input id="geminiApiKey" type="password" placeholder="AIza..." /></div>
+      <div class="row"><label>Gemini Model</label>
+        <select id="geminiModel">
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+          <option value="__custom__">Custom…</option>
+        </select>
+      </div>
+      <div class="row hidden" id="geminiModelCustomRow">
+        <label>Custom Gemini Model ID</label>
+        <input id="geminiModelCustom" placeholder="e.g. gemini-2.5-flash" />
         <div class="muted">Use this if your model is not in the dropdown.</div>
       </div>
     </div>

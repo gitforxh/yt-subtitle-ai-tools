@@ -115,6 +115,53 @@ async function callExplainViaOpenAI(cfg, text, rid, controller) {
   return mergeGrammarIntoItems(payload);
 }
 
+async function callExplainViaGemini(cfg, text, rid, controller) {
+  const apiKey = String(cfg?.geminiApiKey || '').trim();
+  if (!apiKey) throw new Error('Missing Gemini API key in settings');
+
+  const model = String(cfg?.geminiModel || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+  const userLanguage = String(cfg?.userLanguage || 'en').trim() || 'en';
+  inflightExplainRequests.set(rid, { controller, provider: 'gemini' });
+
+  const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context. Write meaning/explanation/example in user language (${userLanguage}). Return JSON only with shape: {"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}\n\n<text>${text}</text>`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: 'application/json'
+      },
+      contents: [{
+        role: 'user',
+        parts: [{ text: prompt }]
+      }]
+    }),
+    signal: controller.signal
+  });
+
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`Gemini failed: ${res.status} ${raw.slice(0, 220)}`);
+
+  const payload = extractFirstJsonObject((() => {
+    try {
+      const obj = JSON.parse(raw);
+      const txt = obj?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('\n') || '';
+      return txt;
+    } catch (_) {
+      return raw;
+    }
+  })());
+
+  if (!payload || String(payload.requestId || '').trim() !== rid) {
+    throw new Error('Gemini response invalid or requestId mismatch');
+  }
+
+  return mergeGrammarIntoItems(payload);
+}
+
 async function callExplain(text, requestId) {
   const cfg = await getBridgeConfig();
   const provider = (cfg?.aiProvider || 'openclaw').toLowerCase();
@@ -124,6 +171,9 @@ async function callExplain(text, requestId) {
   try {
     if (provider === 'openai') {
       return await callExplainViaOpenAI(cfg, text, rid, controller);
+    }
+    if (provider === 'gemini') {
+      return await callExplainViaGemini(cfg, text, rid, controller);
     }
     return await callExplainViaOpenClaw(cfg, text, rid, controller);
   } finally {
@@ -168,6 +218,17 @@ async function testBridge(config) {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (!res.ok) throw new Error(`OpenAI auth failed: ${res.status}`);
+    await setStorage({ bridgeConfig: config, bridgeConnected: true });
+    return true;
+  }
+
+  if (provider === 'gemini') {
+    const apiKey = String(config?.geminiApiKey || '').trim();
+    if (!apiKey) throw new Error('Missing Gemini API key');
+    const model = String(config?.geminiModel || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Gemini auth/model failed: ${res.status}`);
     await setStorage({ bridgeConfig: config, bridgeConnected: true });
     return true;
   }
@@ -336,6 +397,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
         if (provider === 'openai') {
           const connected = !!String(config.openaiApiKey || '').trim();
+          sendResponse({ ok: true, connected, config });
+          return;
+        }
+
+        if (provider === 'gemini') {
+          const connected = !!String(config.geminiApiKey || '').trim();
           sendResponse({ ok: true, connected, config });
           return;
         }

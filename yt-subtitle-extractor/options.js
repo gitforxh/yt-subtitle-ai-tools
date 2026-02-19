@@ -9,23 +9,25 @@ function setStatus(text, isError = false) {
 
 function toggleProviderSections(provider) {
   const isOpenAI = provider === 'openai';
-  document.getElementById('openclawSection').classList.toggle('hidden', isOpenAI);
+  const isGemini = provider === 'gemini';
+  document.getElementById('openclawSection').classList.toggle('hidden', isOpenAI || isGemini);
   document.getElementById('openaiSection').classList.toggle('hidden', !isOpenAI);
+  document.getElementById('geminiSection').classList.toggle('hidden', !isGemini);
 }
 
-function setCustomModelVisibility(visible) {
-  document.getElementById('openaiModelCustomRow').classList.toggle('hidden', !visible);
+function setCustomModelVisibility(rowId, visible) {
+  document.getElementById(rowId).classList.toggle('hidden', !visible);
 }
 
-function applyOpenAIModelToForm(model) {
-  const select = document.getElementById('openaiModel');
-  const customInput = document.getElementById('openaiModelCustom');
+function applyModelToForm({ model, selectId, customInputId, customRowId, fallbackModel }) {
+  const select = document.getElementById(selectId);
+  const customInput = document.getElementById(customInputId);
   const value = (model || '').trim();
 
   if (!value) {
-    select.value = 'gpt-4o-mini';
+    select.value = fallbackModel;
     customInput.value = '';
-    setCustomModelVisibility(false);
+    setCustomModelVisibility(customRowId, false);
     return;
   }
 
@@ -33,21 +35,21 @@ function applyOpenAIModelToForm(model) {
   if (preset) {
     select.value = value;
     customInput.value = '';
-    setCustomModelVisibility(false);
+    setCustomModelVisibility(customRowId, false);
     return;
   }
 
   select.value = '__custom__';
   customInput.value = value;
-  setCustomModelVisibility(true);
+  setCustomModelVisibility(customRowId, true);
 }
 
-function getSelectedOpenAIModel() {
-  const selectValue = document.getElementById('openaiModel').value;
+function getSelectedModel({ selectId, customInputId, fallbackModel }) {
+  const selectValue = document.getElementById(selectId).value;
   if (selectValue === '__custom__') {
-    return document.getElementById('openaiModelCustom').value.trim() || 'gpt-4o-mini';
+    return document.getElementById(customInputId).value.trim() || fallbackModel;
   }
-  return selectValue || 'gpt-4o-mini';
+  return selectValue || fallbackModel;
 }
 
 function readForm() {
@@ -57,7 +59,9 @@ function readForm() {
     sessionKey: document.getElementById('sessionKey').value.trim() || 'ext-transcript',
     userLanguage: document.getElementById('userLanguage').value.trim() || 'en',
     openaiApiKey: document.getElementById('openaiApiKey').value.trim(),
-    openaiModel: getSelectedOpenAIModel()
+    openaiModel: getSelectedModel({ selectId: 'openaiModel', customInputId: 'openaiModelCustom', fallbackModel: 'gpt-4o-mini' }),
+    geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
+    geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-2.5-flash' })
   };
 }
 
@@ -70,7 +74,21 @@ async function load() {
   document.getElementById('sessionKey').value = c.sessionKey || 'ext-transcript';
   document.getElementById('userLanguage').value = c.userLanguage || 'en';
   document.getElementById('openaiApiKey').value = c.openaiApiKey || '';
-  applyOpenAIModelToForm(c.openaiModel || 'gpt-4o-mini');
+  applyModelToForm({
+    model: c.openaiModel || 'gpt-4o-mini',
+    selectId: 'openaiModel',
+    customInputId: 'openaiModelCustom',
+    customRowId: 'openaiModelCustomRow',
+    fallbackModel: 'gpt-4o-mini'
+  });
+  document.getElementById('geminiApiKey').value = c.geminiApiKey || '';
+  applyModelToForm({
+    model: c.geminiModel || 'gemini-2.5-flash',
+    selectId: 'geminiModel',
+    customInputId: 'geminiModelCustom',
+    customRowId: 'geminiModelCustomRow',
+    fallbackModel: 'gemini-2.5-flash'
+  });
 
   toggleProviderSections(document.getElementById('aiProvider').value);
 }
@@ -95,6 +113,9 @@ async function check() {
   if (provider === 'openai') {
     return setStatus(r.connected ? 'OpenAI config looks valid' : 'OpenAI not configured', !r.connected);
   }
+  if (provider === 'gemini') {
+    return setStatus(r.connected ? 'Gemini config looks valid' : 'Gemini not configured', !r.connected);
+  }
   setStatus(r.connected ? 'OpenClaw helper connected' : 'OpenClaw helper not connected', !r.connected);
 }
 
@@ -103,9 +124,16 @@ document.getElementById('aiProvider').addEventListener('change', (e) => {
 });
 document.getElementById('openaiModel').addEventListener('change', (e) => {
   const isCustom = e.target.value === '__custom__';
-  setCustomModelVisibility(isCustom);
+  setCustomModelVisibility('openaiModelCustomRow', isCustom);
   if (!isCustom) {
     document.getElementById('openaiModelCustom').value = '';
+  }
+});
+document.getElementById('geminiModel').addEventListener('change', (e) => {
+  const isCustom = e.target.value === '__custom__';
+  setCustomModelVisibility('geminiModelCustomRow', isCustom);
+  if (!isCustom) {
+    document.getElementById('geminiModelCustom').value = '';
   }
 });
 document.getElementById('saveBtn').addEventListener('click', save);
