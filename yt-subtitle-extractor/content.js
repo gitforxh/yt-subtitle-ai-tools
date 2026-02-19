@@ -606,6 +606,14 @@
         return items;
     }
 
+    function renderAIErrorMessage(msg) {
+        const safe = String(msg || 'Failed').replace(/</g, '&lt;');
+        if (/missing\s+.*api key.*settings/i.test(safe)) {
+            return `AI error: ${safe.replace(/settings/gi, '<a href="#" id="yt-open-settings-link">settings</a>')}`;
+        }
+        return `AI error: ${safe}`;
+    }
+
     async function fetchDictionaryFirst(text) {
         const cacheKey = `dict:${text.trim()}`;
         if (explainCache.has(cacheKey)) return explainCache.get(cacheKey);
@@ -928,7 +936,14 @@
                     }
                     const msg = (err?.message || 'Failed').replace(/</g, '&lt;');
                     if (!/abort/i.test(msg)) {
-                        list.innerHTML = `AI error: ${msg}`;
+                        list.innerHTML = renderAIErrorMessage(msg);
+                        const settingsLink = list.querySelector('#yt-open-settings-link');
+                        if (settingsLink) {
+                            settingsLink.addEventListener('click', async (ev) => {
+                                ev.preventDefault();
+                                await chrome.runtime.sendMessage({ type: 'bridge:openOptions' });
+                            });
+                        }
                     }
                     aiStatus.textContent = '';
                 } finally {

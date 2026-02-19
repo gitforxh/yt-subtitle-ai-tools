@@ -478,6 +478,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
+      if (msg?.type === 'bridge:openOptions') {
+        try {
+          await chrome.runtime.openOptionsPage();
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false, error: err?.message || 'Failed to open settings' });
+        }
+        return;
+      }
       sendResponse({ ok: false, error: 'Unknown message type' });
     } catch (err) {
       sendResponse({ ok: false, error: err?.message || 'Unexpected error' });
