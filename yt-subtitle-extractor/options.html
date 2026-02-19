@@ -47,6 +47,8 @@
           <option value="o4-mini">o4-mini (reasoning)</option>
           <option value="__custom__">Custom…</option>
         </select>
+        <button id="refreshOpenAIModelsBtn" style="margin-top:8px;">Refresh model list from OpenAI</button>
+        <div class="muted">Fetches <code>/v1/models</code> and keeps likely chat/reasoning model IDs (gpt/o).</div>
       </div>
       <div class="row hidden" id="openaiModelCustomRow">
         <label>Custom OpenAI Model ID</label>

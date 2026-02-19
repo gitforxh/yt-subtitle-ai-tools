@@ -52,6 +52,81 @@ function getSelectedModel({ selectId, customInputId, fallbackModel }) {
   return selectValue || fallbackModel;
 }
 
+function normalizeOpenAIModelName(name) {
+  return String(name || '').trim();
+}
+
+function setOpenAIModelOptions(modelIds, preferredModel) {
+  const select = document.getElementById('openaiModel');
+  const models = Array.from(new Set((modelIds || []).map(normalizeOpenAIModelName).filter(Boolean)));
+
+  const current = String(preferredModel || getSelectedModel({
+    selectId: 'openaiModel',
+    customInputId: 'openaiModelCustom',
+    fallbackModel: 'gpt-4o-mini'
+  }) || '').trim();
+
+  select.innerHTML = '';
+  for (const m of models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    select.appendChild(opt);
+  }
+  const custom = document.createElement('option');
+  custom.value = '__custom__';
+  custom.textContent = 'Custom…';
+  select.appendChild(custom);
+
+  applyModelToForm({
+    model: current,
+    selectId: 'openaiModel',
+    customInputId: 'openaiModelCustom',
+    customRowId: 'openaiModelCustomRow',
+    fallbackModel: models[0] || 'gpt-4o-mini'
+  });
+}
+
+async function refreshOpenAIModels() {
+  const apiKey = document.getElementById('openaiApiKey').value.trim();
+  if (!apiKey) {
+    setStatus('Enter OpenAI API key first, then refresh models.', true);
+    return;
+  }
+
+  const btn = document.getElementById('refreshOpenAIModelsBtn');
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = 'Refreshing...';
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    const raw = await res.text();
+    if (!res.ok) throw new Error(`OpenAI models failed: ${res.status} ${raw.slice(0, 180)}`);
+
+    const obj = JSON.parse(raw);
+    const ids = (Array.isArray(obj?.data) ? obj.data : [])
+      .map((m) => String(m?.id || '').trim())
+      .filter(Boolean)
+      .filter((id) => /^(gpt|o\d|o[1-9]|o3|o4)/i.test(id))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+      .reverse();
+
+    if (!ids.length) throw new Error('No compatible OpenAI model IDs returned.');
+
+    setOpenAIModelOptions(ids);
+    await setStorage({ bridgeConfig: readForm() });
+    setStatus(`OpenAI models refreshed (${ids.length} found)`);
+  } catch (err) {
+    setStatus(err?.message || 'Failed to refresh OpenAI models', true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
 function normalizeGeminiModelName(name) {
   return String(name || '').replace(/^models\//, '').trim();
 }
@@ -148,6 +223,9 @@ async function refreshGeminiModels() {
 }
 
 function readForm() {
+  const openaiModelsList = Array.from(document.getElementById('openaiModel').options)
+    .map((o) => o.value)
+    .filter((v) => v && v !== '__custom__');
   const geminiModelsList = Array.from(document.getElementById('geminiModel').options)
     .map((o) => o.value)
     .filter((v) => v && v !== '__custom__');
@@ -159,6 +237,7 @@ function readForm() {
     userLanguage: document.getElementById('userLanguage').value.trim() || 'en',
     openaiApiKey: document.getElementById('openaiApiKey').value.trim(),
     openaiModel: getSelectedModel({ selectId: 'openaiModel', customInputId: 'openaiModelCustom', fallbackModel: 'gpt-4o-mini' }),
+    openaiModelsList,
     geminiApiKey: document.getElementById('geminiApiKey').value.trim(),
     geminiModel: getSelectedModel({ selectId: 'geminiModel', customInputId: 'geminiModelCustom', fallbackModel: 'gemini-3-flash' }),
     geminiModelsList
@@ -181,6 +260,9 @@ async function load() {
     customRowId: 'openaiModelCustomRow',
     fallbackModel: 'gpt-4o-mini'
   });
+  if (Array.isArray(c.openaiModelsList) && c.openaiModelsList.length) {
+    setOpenAIModelOptions(c.openaiModelsList, c.openaiModel || '');
+  }
   document.getElementById('geminiApiKey').value = c.geminiApiKey || '';
   applyModelToForm({
     model: c.geminiModel || 'gemini-3-flash',
@@ -242,6 +324,7 @@ document.getElementById('geminiModel').addEventListener('change', (e) => {
 document.getElementById('saveBtn').addEventListener('click', save);
 document.getElementById('connectBtn').addEventListener('click', connect);
 document.getElementById('checkBtn').addEventListener('click', check);
+document.getElementById('refreshOpenAIModelsBtn').addEventListener('click', refreshOpenAIModels);
 document.getElementById('refreshGeminiModelsBtn').addEventListener('click', refreshGeminiModels);
 
 load();
