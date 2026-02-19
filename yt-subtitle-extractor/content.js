@@ -888,7 +888,7 @@
 
         if (aiBtn) {
             const providerName = await getAIProviderName();
-            aiBtn.textContent = `Get explanation by ${providerName}`;
+            aiBtn.textContent = `Get explanation by AI (${providerName})`;
         }
 
         try {
