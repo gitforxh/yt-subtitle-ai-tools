@@ -583,7 +583,7 @@
     async function getAIProviderName() {
         try {
             const r = await chrome.runtime.sendMessage({ type: 'bridge:status' });
-            const provider = String(r?.config?.aiProvider || 'openclaw').toLowerCase();
+            const provider = String(r?.config?.aiProvider || 'gemini').toLowerCase();
             if (provider === 'gemini') return 'Gemini';
             if (provider === 'openai') return 'OpenAI';
             return 'OpenClaw';
