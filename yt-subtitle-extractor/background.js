@@ -125,24 +125,33 @@ async function callExplainViaGemini(cfg, text, rid, controller) {
 
   const prompt = `Task: Explain ONLY the selected text between <text> tags. Treat this as standalone with no prior context. Write meaning/explanation/example in user language (${userLanguage}). Return JSON only with shape: {"requestId":"${rid}","items":[{"word":"...","reading":"...","partOfSpeech":"...","meaning":"..."}],"grammar":[{"pattern":"...","explanation":"...","example":"..."}]}\n\n<text>${text}</text>`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: 'application/json'
-      },
-      contents: [{
-        role: 'user',
-        parts: [{ text: prompt }]
-      }]
-    }),
-    signal: controller.signal
-  });
+  async function generateWithModel(targetModel) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json'
+        },
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }]
+      }),
+      signal: controller.signal
+    });
+    const raw = await res.text();
+    return { res, raw, model: targetModel };
+  }
 
-  const raw = await res.text();
+  let { res, raw, model: usedModel } = await generateWithModel(model);
+
+  if (!res.ok && res.status === 404 && /^gemini-3/i.test(model)) {
+    ({ res, raw, model: usedModel } = await generateWithModel('gemini-2.5-flash'));
+  }
+
   if (!res.ok) throw new Error(`Gemini failed: ${res.status} ${raw.slice(0, 220)}`);
 
   const payload = extractFirstJsonObject((() => {
@@ -156,7 +165,7 @@ async function callExplainViaGemini(cfg, text, rid, controller) {
   })());
 
   if (!payload || String(payload.requestId || '').trim() !== rid) {
-    throw new Error('Gemini response invalid or requestId mismatch');
+    throw new Error(`Gemini response invalid or requestId mismatch (${usedModel})`);
   }
 
   return mergeGrammarIntoItems(payload);
@@ -226,8 +235,18 @@ async function testBridge(config) {
     const apiKey = String(config?.geminiApiKey || '').trim();
     if (!apiKey) throw new Error('Missing Gemini API key');
     const model = String(config?.geminiModel || 'gemini-3-flash').trim() || 'gemini-3-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+
+    async function validateModel(targetModel) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(targetModel)}?key=${encodeURIComponent(apiKey)}`;
+      const res = await fetch(url);
+      return { res, model: targetModel };
+    }
+
+    let { res } = await validateModel(model);
+    if (!res.ok && res.status === 404 && /^gemini-3/i.test(model)) {
+      ({ res } = await validateModel('gemini-2.5-flash'));
+    }
+
     if (!res.ok) throw new Error(`Gemini auth/model failed: ${res.status}`);
     await setStorage({ bridgeConfig: config, bridgeConnected: true });
     return true;
